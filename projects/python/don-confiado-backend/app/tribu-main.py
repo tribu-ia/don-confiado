@@ -3,8 +3,6 @@ import uvicorn
 from endpoints.hello_world_webservice import HelloWorldWebService, hello_webservice_api_router
 
 
-
-
 if __name__ == "__main__":
     app = FastAPI()
     app.include_router(hello_webservice_api_router)
