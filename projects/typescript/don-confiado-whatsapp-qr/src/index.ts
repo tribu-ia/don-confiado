@@ -14,6 +14,7 @@ async function main (){
 
     // Manejo de conexión
     sock.ev.on("connection.update", (update) => {
+        console.log("Connection update:", update);
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
