@@ -19,7 +19,7 @@ async function main (){
 
         if (qr) {
             // Generar QR en consola
-            QRCode.toString(qr, { type: "terminal" }, (err, url) => {
+            QRCode.toString(qr, { type: "terminal" , small:true}, (err, url) => {
                 if (err) return console.error("Error generating QR:", err);
                 console.log(url);
             });
