@@ -1,44 +1,72 @@
 import P from "pino";
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, SocketConfig } from "baileys";
 import * as QRCode from "qrcode";
-async function main (){
-    // DO NOT USE IN PROD!!!!
+
+async function main() {
     const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
-    // will use the given state to connect
-    // so if valid credentials are available -- it'll connect without QR
     const sock = makeWASocket({ auth: state });
-    // this will be called as soon as the credentials are updated
-    sock.ev.on("creds.update", saveCreds);
-    // Guardar las credenciales en disco
+
+    
+    let qrAttempts = 0;
+    const maxQrAttempts = 3;
+
+
     sock.ev.on("creds.update", saveCreds);
 
-    // Manejo de conexión
-    sock.ev.on("connection.update", (update) => {
+    sock.ev.on("messages.upsert", (m) => {
+
+        console.log("--------------------[ sock.ev.on - messages.upsert ]-------------------------");
+        console.log("message.upsert:", m);
+        console.log("-----------------------------------------------------------");
+
+    });
+
+
+    sock.ev.on("connection.update", async (update) => {
+        console.log("--------------------[ sock.ev.on - connection.update ]-------------------------");
         console.log("Connection update:", update);
+        console.log("-----------------------------------------------------------");
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            // Generar QR en consola
-            QRCode.toString(qr, { type: "terminal" , small:true}, (err, url) => {
+            qrAttempts++;
+            if (qrAttempts > maxQrAttempts) {
+                console.log("❌ Demasiados intentos de escaneo de QR. Cerrando conexión...");
+                await sock.logout();  // Esto elimina las credenciales
+                process.exit(1); // Termina el proceso
+                return;
+            }
+
+            QRCode.toString(qr, { type: "terminal", small: true }, (err, url) => {
                 if (err) return console.error("Error generating QR:", err);
                 console.log(url);
+                console.log(`📱 Escanea el código QR (${qrAttempts}/${maxQrAttempts})`);
             });
         }
 
         if (connection === "open") {
-            console.log("✅ Connected to WhatsApp");
+            console.log("✅ Conectado a WhatsApp");
         } else if (connection === "close") {
+            console.log("❌ Conexión cerrada");
             const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log("⚠️ Disconnected from WhatsApp", lastDisconnect?.error);
+            console.log("⚠️ Desconectado de WhatsApp", lastDisconnect?.error);
             if (shouldReconnect) {
-                console.log("🔁 Reconnecting...");
-                sock.connect();
+                console.log("🔁 Reintentando conexión...");
+                try {
+                    main();
+                } catch (err) {
+                    console.error("❌ Error reconectando:", err);
+                    process.exit(1);
+                }
             } else {
-                console.log("🚪 Logged out");
+                console.log("🚪 Sesión cerrada");
+                process.exit(0);
             }
         }
     });
 }
+
 main().catch((err) => {
-    console.error("Error in main:", err);
+    console.error("Error en main:", err);
+    process.exit(1);
 });
