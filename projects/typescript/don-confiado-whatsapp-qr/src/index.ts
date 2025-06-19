@@ -1,46 +1,108 @@
 import P from "pino";
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, SocketConfig } from "baileys";
 import * as QRCode from "qrcode";
+import {
+    makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    SocketConfig,
+    WASocket,
+    AuthenticationState
+} from "baileys";
+
+// Tipado correcto del recurso global
+interface GlobalResource {
+    authState: AuthenticationState | null;
+    authSaveCreds: (() => Promise<void>) | null;
+}
+
+const globalResource: GlobalResource = {
+    authState: null,
+    authSaveCreds: null
+};
 
 async function main() {
+    const sock = makeWASocket({ auth: globalResource.authState as AuthenticationState });
+    const handler = new WhatsAppHandler(sock, globalResource.authSaveCreds as () => Promise<void>);
+
+    sock.ev.on("creds.update", handler.onCredsUpdate);
+    sock.ev.on("messages.upsert", handler.onMessagesUpsert);
+    sock.ev.on("connection.update", handler.onConnectionUpdate);
+}
+
+export async function startAuthState(): Promise<void> {
     const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
-    const sock = makeWASocket({ auth: state });
+    globalResource.authState = state;
+    globalResource.authSaveCreds = saveCreds;
+    main().catch((err) => {
+        console.error("Error en startAuthState:", err);
+        process.exit(1);
+    })
+}
 
-    
-    let qrAttempts = 0;
-    const maxQrAttempts = 3;
+async function startWhatsApp() {
+    try {
+        await startAuthState();
+        console.log("✅ Estado de autenticación inicializado correctamente.");
+    } catch (error) {
+        console.error("❌ Error al iniciar el estado de autenticación:", error);
+        process.exit(1);
+    }
+}
 
+export { globalResource };
+class WhatsAppHandler {
+    private sock!: WASocket;
+    private qrAttempts = 0;
+    private readonly maxQrAttempts = 3;
+    private readonly saveCreds: () => Promise<void>;
 
-    sock.ev.on("creds.update", saveCreds);
+    constructor(sock: WASocket, saveCreds: () => Promise<void>) {
+        this.sock = sock;
+        this.saveCreds = saveCreds;
 
-    sock.ev.on("messages.upsert", (m) => {
+        // Bind methods to this instance
+        this.onCredsUpdate = this.onCredsUpdate.bind(this);
+        this.onMessagesUpsert = this.onMessagesUpsert.bind(this);
+        this.onConnectionUpdate = this.onConnectionUpdate.bind(this);
+    }
 
+    onCredsUpdate() {
+        this.saveCreds();
+    }
+
+    onMessagesUpsert(m: any) {
         console.log("--------------------[ sock.ev.on - messages.upsert ]-------------------------");
         console.log("message.upsert:", m);
+        for (const msg of m.messages) {
+            if (!msg.key.fromMe) {
+                console.log("Mensaje recibido de:", msg.key.remoteJid);
+                console.log("Contenido del mensaje:", msg.message);
+            }
+        }
+        console.log("Messages:", m.messages);
         console.log("-----------------------------------------------------------");
+    }
 
-    });
-
-
-    sock.ev.on("connection.update", async (update) => {
+    async onConnectionUpdate(update: any) {
         console.log("--------------------[ sock.ev.on - connection.update ]-------------------------");
         console.log("Connection update:", update);
         console.log("-----------------------------------------------------------");
+
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            qrAttempts++;
-            if (qrAttempts > maxQrAttempts) {
+            this.qrAttempts++;
+            if (this.qrAttempts > this.maxQrAttempts) {
                 console.log("❌ Demasiados intentos de escaneo de QR. Cerrando conexión...");
-                await sock.logout();  // Esto elimina las credenciales
-                process.exit(1); // Termina el proceso
+                await this.sock.logout();
+                process.exit(1);
                 return;
             }
 
             QRCode.toString(qr, { type: "terminal", small: true }, (err, url) => {
                 if (err) return console.error("Error generating QR:", err);
                 console.log(url);
-                console.log(`📱 Escanea el código QR (${qrAttempts}/${maxQrAttempts})`);
+                console.log(`📱 Escanea el código QR (${this.qrAttempts}/${this.maxQrAttempts})`);
             });
         }
 
@@ -53,7 +115,7 @@ async function main() {
             if (shouldReconnect) {
                 console.log("🔁 Reintentando conexión...");
                 try {
-                    main();
+                    await main(); // Reconectar
                 } catch (err) {
                     console.error("❌ Error reconectando:", err);
                     process.exit(1);
@@ -63,10 +125,13 @@ async function main() {
                 process.exit(0);
             }
         }
-    });
+    }
 }
 
-main().catch((err) => {
-    console.error("Error en main:", err);
+
+
+
+startWhatsApp().catch((err) => {
+    console.error("❌ Error al iniciar WhatsApp:", err);
     process.exit(1);
 });
