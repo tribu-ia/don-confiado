@@ -1,14 +1,17 @@
 import { WASocket, DisconnectReason } from "baileys";
+import QRCode from "qrcode";
 
 class WhatsAppHandler {
     private sock!: WASocket;
     private qrAttempts = 0;
     private readonly maxQrAttempts = 3;
     private readonly saveCreds: () => Promise<void>;
+    private readonly restartSock: () => Promise<void>;
 
-    constructor(sock: WASocket, saveCreds: () => Promise<void>) {
+    constructor(sock: WASocket, saveCreds: () => Promise<void>, restartSock: () => Promise<void> ){
         this.sock = sock;
         this.saveCreds = saveCreds;
+        this.restartSock = restartSock;
 
         // Bind methods to this instance
         this.onCredsUpdate = this.onCredsUpdate.bind(this);
@@ -20,7 +23,10 @@ class WhatsAppHandler {
         sock.ev.on("connection.update", this.onConnectionUpdate.bind(this));
     }
 
-    onCredsUpdate() {
+    onCredsUpdate(q) {
+        console.log("--------------------[ onCredsUpdate  ]-------------------------");
+        console.log("Credenciales actualizadas:", q);
+        console.log("-----------------------------------------------------------");
         this.saveCreds();
     }
 
@@ -69,14 +75,15 @@ class WhatsAppHandler {
             if (shouldReconnect) {
                 console.log("🔁 Reintentando conexión...");
                 try {
-                    await main(); // Reconectar
+                    await this.restartSock(); // Reconectar
                 } catch (err) {
                     console.error("❌ Error reconectando:", err);
                     process.exit(1);
                 }
             } else {
                 console.log("🚪 Sesión cerrada");
-                process.exit(0);
+                //process.exit(0);
+                this.restartSock();
             }
         }
     }
