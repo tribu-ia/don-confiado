@@ -24,22 +24,32 @@ class WhatsAppHandler {
     }
 
     onCredsUpdate(q) {
+        /*
         console.log("--------------------[ onCredsUpdate  ]-------------------------");
         console.log("Credenciales actualizadas:", q);
         console.log("-----------------------------------------------------------");
+        */
         this.saveCreds();
     }
 
     onMessagesUpsert(m: any) {
         console.log("--------------------[ sock.ev.on - messages.upsert ]-------------------------");
-        console.log("message.upsert:", m);
+        //console.log("message.upsert:", m);
         for (const msg of m.messages) {
-            if (!msg.key.fromMe) {
-                console.log("Mensaje recibido de:", msg.key.remoteJid);
-                console.log("Contenido del mensaje:", msg.message);
+            if (!msg.key.fromMe) {                
+                try {
+                    if (msg.message){
+                        console.log("Mensaje recibido de:", msg.key.remoteJid);
+                        console.log("Contenido del mensaje:", msg.message.conversation || msg.message.extendedTextMessage?.text || "No texto disponible");
+                    }
+                    
+                }catch (error) {
+                    console.error("Error al obtener el ID del mensaje:", msg);
+                }
+                
             }
         }
-        console.log("Messages:", m.messages);
+        //console.log("Messages:", m.messages);
         console.log("-----------------------------------------------------------");
     }
 
