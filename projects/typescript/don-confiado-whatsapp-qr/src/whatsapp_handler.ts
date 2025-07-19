@@ -24,29 +24,34 @@ class WhatsAppHandler {
     }
 
     onCredsUpdate(q) {
-        /*
+        
         console.log("--------------------[ onCredsUpdate  ]-------------------------");
         console.log("Credenciales actualizadas:", q);
         console.log("-----------------------------------------------------------");
-        */
+        
         this.saveCreds();
     }
-
+    /**
+     * Maneja los mensajes entrantes y los muestra en la consola.
+     * @param m - El objeto de mensajes recibido.
+     */
     onMessagesUpsert(m: any) {
         console.log("--------------------[ sock.ev.on - messages.upsert ]-------------------------");
         //console.log("message.upsert:", m);
         for (const msg of m.messages) {
-            if (!msg.key.fromMe) {                
-                try {
-                    if (msg.message){
-                        console.log("Mensaje recibido de:", msg.key.remoteJid);
-                        console.log("Contenido del mensaje:", msg.message.conversation || msg.message.extendedTextMessage?.text || "No texto disponible");
-                    }
-                    
-                }catch (error) {
-                    console.error("Error al obtener el ID del mensaje:", msg);
+            if (msg.key.fromMe) {                
+                continue; // Ignorar mensajes enviados por el propio cliente
+            }
+            try {
+                if (msg.message){
+                    console.log("Mensaje recibido de:", msg.key.remoteJid);
+                    console.log("Contenido del mensaje:", msg.message.conversation || msg.message.extendedTextMessage?.text || "No texto disponible");
+                    //Marcar mensaje como leído
+                    this.sock.readMessages([msg.key]);
                 }
                 
+            }catch (error) {
+                console.error("Error al obtener el ID del mensaje:", msg);
             }
         }
         //console.log("Messages:", m.messages);
