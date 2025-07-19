@@ -48,6 +48,10 @@ class WhatsAppHandler {
                     console.log("Contenido del mensaje:", msg.message.conversation || msg.message.extendedTextMessage?.text || "No texto disponible");
                     //Marcar mensaje como leído
                     this.sock.readMessages([msg.key]);
+                    // Echo del mensaje
+                    this.sock.sendMessage(msg.key.remoteJid, {
+                        text: `Echo: ${msg.message.conversation || msg.message.extendedTextMessage?.text || "No texto disponible"}`
+                    });
                 }
                 
             }catch (error) {
