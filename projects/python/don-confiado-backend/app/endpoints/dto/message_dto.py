@@ -1,9 +1,13 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List, Dict
 
 
-# DTO para el mensaje
 class MessageDTO(BaseModel):
     message: str
     source: str
     destination: str
+
+
+class ChatRequestDTO(BaseModel):
+    message: str
+    user_id: str
