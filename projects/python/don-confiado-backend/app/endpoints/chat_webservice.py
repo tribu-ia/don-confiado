@@ -202,7 +202,7 @@ class ChatWebService:
 
         result = model_with_structure.invoke(classify_text)
         print(result)
-        user_intention = result.get("userintention")
+        user_intention = result[0]["args"].get("userintention")
 
         if user_intention == "Other":
             # Rama 'Other': respuesta general con memoria
@@ -331,8 +331,9 @@ class ChatWebService:
                 "Si falta algo, lista los campos faltantes en missing_fields.") + f"\n\nMensaje del usuario: {request.message}"
 
             completeness = completeness_model.invoke(completeness_text)
-            is_complete = bool(completeness.get("is_complete", False))
-            missing_fields = completeness.get("missing_fields", []) or []
+            print(completeness)
+            is_complete = bool(completeness[0]["args"].get("is_complete", False))
+            missing_fields = completeness[0]["args"].get("missing_fields", []) or []
 
             if not is_complete:
                 # Solicitud de datos faltantes (prompt plano + memoria)
@@ -390,8 +391,9 @@ class ChatWebService:
                 "Si un campo no está presente, omítelo (no devuelvas null).\n\n"
                 f"Mensaje del usuario: {request.message}"
             )
-            extracted = extractor.invoke(extract_text)
-            print(extracted)
+            extracted_payload = extractor.invoke(extract_text)
+            print(extracted_payload)
+            extracted = extracted_payload[0]["args"] if isinstance(extracted_payload, list) else extracted_payload
             tipo_documento = extracted.get("tipo_documento")
             numero_documento = extracted.get("numero_documento")
             razon_social = extracted.get("razon_social")
