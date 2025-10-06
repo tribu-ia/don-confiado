@@ -1,4 +1,6 @@
 {
+  "name": "don-confiado-client",
+  "private": true,
   "dependencies": {
     "baileys": "^6.7.18",
     "qrcode": "^1.5.4",
@@ -7,5 +9,9 @@
   "devDependencies": {
     "@types/qrcode": "^1.5.5",
     "typescript": "^5.8.3"
+  },
+  "scripts": {
+    "start:wa": "yarn tsx src/index.ts",
+    "start:chat": "yarn tsx src/index.ts chat"
   }
 }

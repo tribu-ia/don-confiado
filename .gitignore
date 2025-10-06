@@ -1,0 +1,16 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Nested/variant venv dirs
+.venv*/
+venv*/
+env*/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+

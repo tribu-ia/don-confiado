@@ -1,6 +1,12 @@
 import { WhatsAppHandler } from "./whatsapp_handler";
 
 async function main() {
+    const mode = process.argv[2]?.toLowerCase();
+    if (mode === "chat") {
+        await import("./chat_cli");
+        return; // chat_cli starts its own main
+    }
+
     const handler = new WhatsAppHandler();
     handler.initSocket();
 }
