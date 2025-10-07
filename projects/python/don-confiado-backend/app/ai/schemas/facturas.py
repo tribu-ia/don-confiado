@@ -9,9 +9,11 @@ class PayloadCreateProvider(BaseModel):
     telefono: Optional[str] = None
 
 class PayloadCreateProduct(BaseModel):
-    nombre: str = Field(..., description="Nombre del producto")
-    descripcion: str = Field(..., description="Descripción del producto")
-    precio: float = Field(..., description="Precio del producto")
+    nombre: str = Field(..., description="Nombre del producto", max_length=200)
+    precio_venta: float = Field(..., description="Precio de venta del producto", ge=0)
+    cantidad: int = Field(0, description="Cantidad disponible del producto", ge=0)
+    sku: Optional[str] = Field(None, description="Código SKU del producto (se genera automáticamente si no se proporciona)", max_length=50)
+    proveedor: Optional[str] = Field(None, description="Nombre o NIT del proveedor del producto")
 
 class PayloadCreateClient(BaseModel):
     nombre: str = Field(..., description="Nombre del cliente")
