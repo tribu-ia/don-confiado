@@ -5,6 +5,8 @@ from langchain_core.messages import HumanMessage, SystemMessage , AIMessage
 import os
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
+from ai.schemas.facturas import FacturaColombiana, UserIntention   
+    
 """Chat endpoints sin utilizar helpers de memoria de LangChain.
 
 Se usa un almacenamiento en memoria simple (dict + listas) por usuario
@@ -142,244 +144,47 @@ class ChatWebService02:
         
         history_text = self._history_as_text(request.user_id)
 
-        # Esquema de intención + clasificador estructurado
-        intention_schema = {
-            "title": "UserIntention",
-            "description": (
-                "Clasifica la intención del mensaje del usuario. "
-                "Devuelve solo una de las etiquetas permitidas."
-            ),
-            "type": "object",
-            "properties": {
-                "userintention": {
-                    "type": "string",
-                    "enum": ["Create_distribuitor", "Other"],
-                    "description": (
-                        "'Create_distribuitor': cuando el usuario quiere crear/registrar un proveedor/distribuidor. "
-                        "'Other': conversación casual u otro propósito."
-                    ),
-                }
-            },
-            "required": ["userintention"],
-            "additionalProperties": False,
-        }
+        # Usar el modelo Pydantic para clasificación de intención
+        model_with_structure = llm.with_structured_output(UserIntention)
 
-        model_with_structure = llm.with_structured_output(intention_schema)
-
-        # Clasificación de intención (prompt plano)
+        # Clasificación de intención basada en el prompt del Colab
         classify_text = (
-            "Eres un clasificador. Lee la conversación y clasifica la intención "
-            "estrictamente en una de dos etiquetas: 'Create_distribuitor' u 'Other'. "
-            "Usa 'Create_distribuitor' cuando el usuario pretende crear/registrar un proveedor/"
-            "distribuidor (p. ej., menciona crear un proveedor/distribuidor). En otro caso usa 'Other'.\n\n"
+            "Eres un asistente para gestión comercial.\n"
+            "Clasifica la intención del usuario y extrae los datos mencionados según el schema.\n"
+            "Intenciones disponibles: create_provider, create_client, create_product, Create_distribuitor, Other, none, bye.\n"
+            "- 'create_provider': cuando el usuario quiere crear un proveedor\n"
+            "- 'create_client': cuando el usuario quiere crear un cliente\n"
+            "- 'create_product': cuando el usuario quiere crear un producto\n"
+            "- 'create_distribuitor': cuando el usuario quiere crear/registrar un distribuidor\n"
+            "- 'Other': conversación casual u otro propósito\n"
+            "- 'none': sin intención clara\n"
+            "- 'bye': despedida\n\n"
             f"Historial:\n{history_text}\n\n"
             f"Último mensaje del usuario: {user_input}"
         )
 
         result = model_with_structure.invoke(classify_text)
-        print(result)
-        user_intention = result[0]["args"].get("userintention")
+        
+        # Imprimir resultado de detección de intención
+        print("=============== INTENTION DETECTION RESULT ===============")
+        print(f"User Intention: {result.userintention}")
+        print(f"Payload Provider: {result.payload_provider}")
+        print(f"Payload Client: {result.payload_client}")
+        print(f"Payload Product: {result.payload_product}")
+        print(f"Full Result: {result}")
+        print("=========================================================")
 
-        if user_intention == "Other":
-            ai_result = llm.invoke(conversation)
-            reply = getattr(ai_result, "content", str(ai_result))
-            conversation.append(AIMessage(content=reply))            
-            print(ai_result)
-            return {
-                "userintention": "Other",
-                "reply": reply,
-            }
-        else:
-            # Rama 'Create_distribuitor': validar completitud y luego extraer datos
+        # Generate a simple response
+        ai_result = llm.invoke(conversation)
+        reply = getattr(ai_result, "content", str(ai_result))
+        conversation.append(AIMessage(content=reply))
 
-            # 1) Verificación de completitud
-            completeness_schema = {
-                "title": "DistribuidorCompleteness",
-                "type": "object",
-                "properties": {
-                    "is_complete": {"type": "boolean"},
-                    "missing_fields": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": [
-                                "tipo_documento",
-                                "numero_documento",
-                                "razon_social",
-                                "nombres",
-                                "apellidos"
-                            ]
-                        }
-                    }
-                },
-                "required": ["is_complete", "missing_fields"],
-                "additionalProperties": False,
-            }
+        return {
+            "userintention": result.userintention,
+            "reply": reply,
+            "payload_provider": result.payload_provider.model_dump() if result.payload_provider else None,
+            "payload_client": result.payload_client.model_dump() if result.payload_client else None,
+            "payload_product": result.payload_product.model_dump() if result.payload_product else None,
+        }
 
-            completeness_model = llm.with_structured_output(completeness_schema)
-            completeness_text = (
-                "Evalúa si el mensaje contiene la información completa para crear un distribuidor. "
-                "Requisitos: tipo_documento (CC/NIT/CE), numero_documento y (razon_social) o (nombres y apellidos). "
-                "Devuelve is_complete=true solo si todos los requisitos están presentes en el mensaje. "
-                "Si falta algo, lista los campos faltantes en missing_fields.") + f"\n\nMensaje del usuario: {request.message}"
-
-            completeness = completeness_model.invoke(completeness_text)
-            print(completeness)
-            is_complete = bool(completeness[0]["args"].get("is_complete", False))
-            missing_fields = completeness[0]["args"].get("missing_fields", []) or []
-
-            if not is_complete:
-                # Solicitud de datos faltantes (prompt plano + memoria)
-                history_text = self._history_as_text(request.user_id)
-                user_input = request.message
-
-                request_missing_text = (
-                    "ROLE: Don Confiado, asesor empresarial amable y claro.\n"
-                    "Pide al usuario, en una sola oración y sin tecnicismos, los datos faltantes: "
-                    f"{', '.join(missing_fields)}.\n\n"
-                    f"Historial:\n{history_text}\n\n"
-                    f"Usuario: {user_input}\n"
-                    f"Asistente:"
-                )
-
-                reply_obj = llm.invoke(request_missing_text)
-                reply_text = getattr(reply_obj, "content", str(reply_obj))
-                conversation.append(AIMessage(content=reply_text))
-
-                return {
-                    "userintention": "Create_distribuitor",
-                    "status": "need_more_data",
-                    "missing_fields": missing_fields,
-                    "reply": reply_text,
-                }
-
-            # 2) Extracción de datos (solo cuando está completo)
-            extraction_schema = {
-                "title": "DistribuidorData",
-                "description": (
-                    "Extra unicamente los campos que el usuario proporciona. No inventes valores."
-                ),
-                "type": "object",
-                "properties": {
-                    "tipo_documento": {
-                        "type": "string",
-                        "enum": ["CC", "NIT", "CE"],
-                        "description": "Tipo de documento: CC, NIT o CE"
-                    },
-                    "numero_documento": {"type": "string"},
-                    "razon_social": {"type": "string"},
-                    "nombres": {"type": "string"},
-                    "apellidos": {"type": "string"},
-                    "telefono_fijo": {"type": "string"},
-                    "telefono_celular": {"type": "string"},
-                    "direccion": {"type": "string"},
-                    "email": {"type": "string"}
-                },
-                "additionalProperties": False,
-            }
-
-            extractor = llm.with_structured_output(extraction_schema)
-            extract_text = (
-                "Extrae los campos del distribuidor desde el mensaje del usuario. No inventes datos. "
-                "Si un campo no está presente, omítelo (no devuelvas null).\n\n"
-                f"Mensaje del usuario: {request.message}"
-            )
-            extracted_payload = extractor.invoke(extract_text)
-            print(extracted_payload)
-            extracted = extracted_payload[0]["args"] if isinstance(extracted_payload, list) else extracted_payload
-            tipo_documento = extracted.get("tipo_documento")
-            numero_documento = extracted.get("numero_documento")
-            razon_social = extracted.get("razon_social")
-            nombres = extracted.get("nombres")
-            apellidos = extracted.get("apellidos")
-
-            # Sanitizar registro (evitar null, vacíos y "null")
-            def _valid_value(value: object) -> bool:
-                if value is None:
-                    return False
-                text = str(value).strip()
-                if text == "":
-                    return False
-                if text.lower() == "null":
-                    return False
-                return True
-
-            # Validación credenciales Supabase
-            supabase_url = os.getenv("SUPABASE_URL")
-            supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-            if not supabase_url or not supabase_key:
-                # Respuesta breve informando falta de credenciales
-                user_input = request.message
-
-                creds_text = (
-                    "ROLE: Don Confiado, asesor empresarial.\n"
-                    "Informa brevemente que faltan las credenciales de Supabase (SUPABASE_URL / "
-                    "SUPABASE_SERVICE_ROLE_KEY) y que deben configurarse antes de continuar.\n\n"
-                    f"Usuario: {user_input}\n"
-                    f"Asistente:"
-                )
-                reply_obj = llm.invoke(creds_text)
-                reply_text = getattr(reply_obj, "content", str(reply_obj))
-                conversation.append(AIMessage(content=reply_text))                
-                return {
-                    "userintention": "Create_distribuitor",
-                    "status": "error",
-                    "error": "Missing Supabase credentials",
-                    "reply": reply_text,
-                    "extracted": extracted,
-                }
-
-            # Inicialización cliente Supabase
-            global _supabase_client
-            try:
-                _supabase_client
-            except NameError:
-                _supabase_client = create_client(supabase_url, supabase_key)
-
-            record = {k: v for k, v in extracted.items() if _valid_value(v)}
-            record["tipo_tercero"] = "proveedor"
-
-            try:
-                # Inserción en Supabase y confirmación
-                response = _supabase_client.table("terceros").insert(record).execute()
-                data = getattr(response, "data", None)
-
-                user_input = request.message
-
-                confirm_text = (
-                    "ROLE: Don Confiado, asesor empresarial.\n"
-                    "Confirma brevemente que el distribuidor ha sido creado exitosamente.\n\n"
-                    f"Usuario: {user_input}\n"
-                    f"Asistente:"
-                )
-                reply_obj = llm.invoke(confirm_text)
-                reply_text = getattr(reply_obj, "content", str(reply_obj))
-                conversation.append(AIMessage(content=reply_text))                
-
-                return {
-                    "userintention": "Create_distribuitor",
-                    "status": "created",
-                    "data": data,
-                    "reply": reply_text,
-                }
-            except Exception as e:
-                # Manejo de error al crear distribuidor (prompt plano)
-                user_input = request.message
-
-                error_text = (
-                    "ROLE: Don Confiado, asesor empresarial empático.\n"
-                    "Informa que ocurrió un error al crear el distribuidor y que intente de nuevo, "
-                    "sin detalles técnicos.\n\n"
-                    f"Usuario: {user_input}\n"
-                    f"Asistente:"
-                )
-                reply_obj = llm.invoke(error_text)
-                reply_text = getattr(reply_obj, "content", str(reply_obj))
-                conversation.append(AIMessage(content=reply_text))                
-                return {
-                    "userintention": "Create_distribuitor",
-                    "status": "error",
-                    "error": str(e),
-                    "reply": reply_text,
-                    "extracted": extracted,
-                }
+        

@@ -3,7 +3,7 @@ from business.entities.tercero import Tercero
 from business.dao.tercero_dao import TerceroDAO
 
 
-init_db()
+
 session = SessionLocal()
 
 dao = TerceroDAO(session)
