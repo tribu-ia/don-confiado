@@ -6,7 +6,11 @@ Brief description of the project.
 
 1. Clone the repository.
 2. Create and activate a virtual environment:
+Esto se debe hacer desde la carpeta  projects/python/don-confiado-backend/app
+
     ```bash
+
+
     python3 -m venv venv
     source venv/bin/activate
     ```
