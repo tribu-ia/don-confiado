@@ -181,6 +181,46 @@ class ChatWebService02:
             raise HTTPException(status_code=500, detail=f"Error al guardar el producto: {str(e)}")
         finally:
             session.close()
+    
+    def _save_tercero(self, payload, tipo_tercero: str):
+        """Save a tercero (provider or client) to the database using the extracted payload.
+        
+        Args:
+            payload: PayloadCreateProvider or PayloadCreateClient with the extracted data
+            tipo_tercero: Either 'proveedor' or 'cliente'
+        """
+        session = SessionLocal()
+        try:
+            tercero_dao = TerceroDAO(session)
+            
+            # Determine tipo_documento based on NIT format (simple heuristic)
+            # If numeric and length suggests company NIT, use 'NIT', otherwise 'CC'
+            tipo_documento = 'NIT'
+            
+            # Map payload fields to Tercero entity
+            # For providers and clients, we'll use razon_social for business names
+            nuevo_tercero = Tercero(
+                tipo_documento=tipo_documento,
+                numero_documento=payload.nit,
+                razon_social=payload.nombre,
+                telefono_celular=getattr(payload, 'telefono', None),
+                tipo_tercero=tipo_tercero,
+                direccion=getattr(payload, 'direccion', None)
+            )
+            
+            # Save the tercero (create method already commits)
+            saved_tercero = tercero_dao.create(nuevo_tercero)
+            
+            print(f"✅ {tipo_tercero.capitalize()} saved successfully: {saved_tercero}")
+            return saved_tercero
+            
+        except Exception as e:
+            session.rollback()
+            print(f"❌ Error saving {tipo_tercero}: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error al guardar el {tipo_tercero}: {str(e)}")
+        finally:
+            session.close()
+    
     # --- v1.1: Clasificación de intención + extracción y registro de distribuidor ---
     @chat_webservice_api_router_02.post("/api/chat_v2.0")
     async def chat_with_structure_output(self, request: ChatRequestDTO):
@@ -204,12 +244,11 @@ class ChatWebService02:
         classify_text = (
             "Eres un asistente para gestión comercial.\n"
             "Clasifica la intención del usuario y extrae los datos mencionados según el schema.\n"
-            "Intenciones disponibles: create_provider, create_client, create_product, Create_distribuitor, Other, none, bye.\n"
+            "Intenciones disponibles: create_provider, create_client, create_product, other, none, bye.\n"
             "- 'create_provider': cuando el usuario quiere crear un proveedor\n"
             "- 'create_client': cuando el usuario quiere crear un cliente\n"
             "- 'create_product': cuando el usuario quiere crear un producto\n"
-            "- 'create_distribuitor': cuando el usuario quiere crear/registrar un distribuidor\n"
-            "- 'Other': conversación casual u otro propósito\n"
+            "- 'other': conversación casual u otro propósito\n"
             "- 'none': sin intención clara\n"
             "- 'bye': despedida\n\n"
             f"Historial:\n{history_text}\n\n"
@@ -239,6 +278,30 @@ class ChatWebService02:
                 print(f"⚠️ Failed to save product: {str(e)}")
                 # Don't raise the exception, just log it and continue with the conversation
 
+        # Handle create_provider intention - save the provider
+        saved_provider = None
+        provider_saved_successfully = False
+        if result.userintention == "create_provider" and result.payload_provider:
+            try:
+                saved_provider = self._save_tercero(result.payload_provider, 'proveedor')
+                provider_saved_successfully = True
+                print(f"🎉 Provider '{saved_provider.razon_social}' saved with ID: {saved_provider.id}")
+            except Exception as e:
+                print(f"⚠️ Failed to save provider: {str(e)}")
+                # Don't raise the exception, just log it and continue with the conversation
+
+        # Handle create_client intention - save the client
+        saved_client = None
+        client_saved_successfully = False
+        if result.userintention == "create_client" and result.payload_client:
+            try:
+                saved_client = self._save_tercero(result.payload_client, 'cliente')
+                client_saved_successfully = True
+                print(f"🎉 Client '{saved_client.razon_social}' saved with ID: {saved_client.id}")
+            except Exception as e:
+                print(f"⚠️ Failed to save client: {str(e)}")
+                # Don't raise the exception, just log it and continue with the conversation
+
         # Generate a simple response
         ai_result = llm.invoke(conversation)
         reply = getattr(ai_result, "content", str(ai_result))
@@ -254,6 +317,12 @@ class ChatWebService02:
             "product_saved": product_saved_successfully,
             "saved_product_id": saved_product.id if saved_product else None,
             "saved_product_sku": saved_product.sku if saved_product else None,
+            "provider_saved": provider_saved_successfully,
+            "saved_provider_id": saved_provider.id if saved_provider else None,
+            "saved_provider_name": saved_provider.razon_social if saved_provider else None,
+            "client_saved": client_saved_successfully,
+            "saved_client_id": saved_client.id if saved_client else None,
+            "saved_client_name": saved_client.razon_social if saved_client else None,
         }
 
         

@@ -15,6 +15,12 @@ class ProductoDAO(GenericDAO[Producto]):
         return self.session.query(Producto).filter(
             Producto.proveedor_id == proveedor_id
         ).all()
+        
+    def findByNombre(self, nombre: str) -> List[Producto]:
+        """Find all products by name."""
+        return self.session.query(Producto).filter(
+            Producto.nombre.ilike(f"%{nombre}%")
+        ).all()
     
 
 

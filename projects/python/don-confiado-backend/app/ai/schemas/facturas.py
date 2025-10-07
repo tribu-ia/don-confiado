@@ -25,11 +25,13 @@ class UserIntention(BaseModel):
     """
     Modelo de salida estructurada: intención + payload correspondiente.
     """
-    userintention: Literal["create_provider", "create_client", "create_product", "create_distributor", "other", "none", "bye"] = Field(
+    userintention: Literal["create_provider", "create_client", "create_product", "other", "none", "bye"] = Field(
         ...,
         description=(
-            "'Create_distributor': cuando el usuario quiere crear/registrar un proveedor/distribuidor. "
-            "'Other': conversación casual u otro propósito."
+            "'create_provider': cuando el usuario quiere crear un proveedor. "
+            "'create_client': cuando el usuario quiere crear un cliente. "
+            "'create_product': cuando el usuario quiere crear un producto. "
+            "'other': conversación casual u otro propósito."
         )
     )
     payload_provider: Optional[PayloadCreateProvider] = None
