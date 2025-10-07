@@ -7,9 +7,24 @@ import {
   SocketConfig,
   WASocket,
   AuthenticationState,
+  downloadMediaMessage,
+  getContentType
 } from "baileys";
+
+
+//import makeWASocket, { downloadMediaMessage } from "@whiskeysockets/baileys"
+import {createWriteStream , readFileSync} from "fs";
+
+
 import { rmSync, existsSync } from "fs";
 import { join } from "path";
+
+
+function fileToBase64(path: string): string {
+  const fileBuffer = readFileSync(path);
+  return fileBuffer.toString('base64');
+}
+
 
 class WhatsAppHandler {
   private sock!: WASocket;
@@ -54,23 +69,43 @@ class WhatsAppHandler {
    * Maneja los mensajes entrantes y los muestra en la consola.
    * @param m - El objeto de mensajes recibido.
    */
-  onMessagesUpsert(m: any) {
-    console.log(
-      "--------------------[ sock.ev.on - messages.upsert ]-------------------------"
-    );
+  async onMessagesUpsert(message_array: any) {
+    console.log("--------------------[ sock.ev.on - messages.upsert ]-------------------------");
     //console.log("message.upsert:", m);
-    for (const msg of m.messages) {
+    for (const msg of message_array.messages) {
       console.log("Mensaje recibido:\n", msg);
       if (msg.key.fromMe) {
-        console.log(
-          "\tIgnorando mensaje enviado por el propio cliente:",
-          msg.key.remoteJid
-        );
+        console.log("\tIgnorando mensaje enviado por el propio cliente:",msg.key.remoteJid);
         continue; // Ignorar mensajes enviados por el propio cliente
       }
+      
       try {
         if (msg.message) {
           console.log("Mensaje recibido de:", msg.key.remoteJid);
+
+          const messageType = getContentType(msg.message);
+          console.log("Tipo de mensaje:", messageType);
+          let  mime_type = "";
+          let filename = "";
+          if (messageType === 'imageMessage') {
+            mime_type = msg.message.imageMessage.mimetype;
+            filename = "/tmp/downloaded-image." + mime_type.split('/')[1];
+
+            // download the media as a stream
+            const stream = await downloadMediaMessage(
+                msg,
+                'stream',
+                {},
+                {
+                    reuploadRequest: this.sock.updateMediaMessage
+                }
+            );
+    
+            // save the image file locally
+            const writeStream = createWriteStream(filename);
+            stream.pipe(writeStream);
+          }
+
           console.log(
             "Contenido del mensaje:",
             msg.message.conversation ||
@@ -84,6 +119,7 @@ class WhatsAppHandler {
                           msg.message.extendedTextMessage?.text ||
                           "No texto disponible";
 
+
           fetch("http://127.0.0.1:8000/api/chat_v2.0", {
             method: "POST",
             headers: {
@@ -92,6 +128,8 @@ class WhatsAppHandler {
             body: JSON.stringify({
               message: message,
               user_id: msg.key.remoteJid,
+              mime_type: mime_type,
+              file_base64: mime_type ? fileToBase64(filename) : null
             }),
             redirect: "follow",
           })
@@ -100,12 +138,13 @@ class WhatsAppHandler {
               console.log("API response:", response);
 
               this.sock.sendMessage(msg.key.remoteJid, {
-                text: response.reply ?? "⚠️ No pude entender tu mensaje",
+                text: response.reply ?? "⚠️ No pude entender tu mensaje - juriel",
               });
             })
             .catch((error) => console.error(error));
         }
       } catch (error) {
+        console.log(error);
         console.error("Error al obtener el ID del mensaje:", msg);
       }
       console.log(

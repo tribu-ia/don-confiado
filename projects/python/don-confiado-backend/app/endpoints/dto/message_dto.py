@@ -11,3 +11,6 @@ class MessageDTO(BaseModel):
 class ChatRequestDTO(BaseModel):
     message: str
     user_id: str
+    mime_type: Optional[str] = None
+    file_base64:Optional[str] = None 
+    
