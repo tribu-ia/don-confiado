@@ -96,6 +96,9 @@ class WhatsAppHandler {
       }
       
       try {
+        //----------------------------------------------------------
+        // PROCESAR MENSAJE 
+        //----------------------------------------------------------
         if (msg.message) {
           console.log("Mensaje recibido de:", msg.key.remoteJid);
 
@@ -104,8 +107,6 @@ class WhatsAppHandler {
           let  mime_type = "";
           let filename = "";
           let img_caption = "";
-          
-          
           
           if (messageType === 'imageMessage') {
             mime_type = msg.message.imageMessage.mimetype;
