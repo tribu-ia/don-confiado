@@ -13,17 +13,11 @@ import {
 
 
 //import makeWASocket, { downloadMediaMessage } from "@whiskeysockets/baileys"
-import {createWriteStream , readFileSync} from "fs";
+import {createWriteStream} from "fs";
 
 
 import { rmSync, existsSync } from "fs";
 import { join } from "path";
-
-
-function fileToBase64(path: string): string {
-  const fileBuffer = readFileSync(path);
-  return fileBuffer.toString('base64');
-}
 
 
 class WhatsAppHandler {
@@ -50,7 +44,7 @@ class WhatsAppHandler {
 
   constructor() {
     // Bind methods to this instance
-    this.saveCreds = null;
+    this.saveCreds = async () => {};
     this.onCredsUpdate = this.onCredsUpdate.bind(this);
     this.onMessagesUpsert = this.onMessagesUpsert.bind(this);
     this.onConnectionUpdate = this.onConnectionUpdate.bind(this);
@@ -87,23 +81,58 @@ class WhatsAppHandler {
           console.log("Tipo de mensaje:", messageType);
           let  mime_type = "";
           let filename = "";
+          let img_caption = "";
+          
+          // Helper function to download and save media files
+          const downloadAndSaveMedia = (stream: any, filepath: string): Promise<void> => {
+            return new Promise((resolve, reject) => {
+              const writeStream = createWriteStream(filepath);
+              stream.pipe(writeStream);
+              writeStream.on('finish', () => {
+                console.log(`✅ File saved successfully: ${filepath}`);
+                resolve();
+              });
+              writeStream.on('error', (err) => {
+                console.error(`❌ Error saving file: ${err}`);
+                reject(err);
+              });
+            });
+          };
+          
           if (messageType === 'imageMessage') {
             mime_type = msg.message.imageMessage.mimetype;
             filename = "/tmp/downloaded-image." + mime_type.split('/')[1];
-
+             
             // download the media as a stream
             const stream = await downloadMediaMessage(
                 msg,
                 'stream',
                 {},
                 {
+                    logger: P({ level: "silent" }),
                     reuploadRequest: this.sock.updateMediaMessage
                 }
             );
     
-            // save the image file locally
-            const writeStream = createWriteStream(filename);
-            stream.pipe(writeStream);
+            // save the image file locally and wait for it to finish
+            await downloadAndSaveMedia(stream, filename);
+          }
+          if (messageType === 'audioMessage') {
+            mime_type = msg.message.audioMessage.mimetype;
+            filename = "/tmp/downloaded-audio." + mime_type.split('/')[1];
+
+            const stream = await downloadMediaMessage(
+              msg,
+              'stream',
+              {},
+              {
+                  logger: P({ level: "silent" }),
+                  reuploadRequest: this.sock.updateMediaMessage
+              }
+            );
+  
+            // save the audio file locally and wait for it to finish
+            await downloadAndSaveMedia(stream, filename);
           }
 
           console.log(
@@ -115,7 +144,8 @@ class WhatsAppHandler {
 
           this.sock.readMessages([msg.key]);
 
-          const message = msg.message.conversation ||
+          const message = msg.message.imageMessage?.caption ||
+                          msg.message.conversation ||
                           msg.message.extendedTextMessage?.text ||
                           "No texto disponible";
 
@@ -129,7 +159,7 @@ class WhatsAppHandler {
               message: message,
               user_id: msg.key.remoteJid,
               mime_type: mime_type,
-              file_base64: mime_type ? fileToBase64(filename) : null
+              file_path: mime_type ? filename : null
             }),
             redirect: "follow",
           })
@@ -175,8 +205,8 @@ class WhatsAppHandler {
   }
 
   async onConnectionUpdateClose(
-    connection: string,
-    lastDisconnect: { error: any }
+    connection: string | undefined,
+    lastDisconnect: { error: any } | undefined
   ) {
     console.log(
       "❌ Conexión cerrada",
@@ -207,7 +237,7 @@ class WhatsAppHandler {
     }
   }
   async onConnectionUpdate(update: {
-    connection: string;
+    connection?: string;
     lastDisconnect?: { error: any };
     qr?: string;
   }) {

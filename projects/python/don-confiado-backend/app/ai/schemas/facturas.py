@@ -3,10 +3,11 @@ from typing import Optional, List, Literal, Any, Dict
 from pydantic import BaseModel, Field
 
 class PayloadCreateProvider(BaseModel):
-    nombre: Optional[str] = None
-    nit: Optional[str] = None
-    direccion: Optional[str] = None
-    telefono: Optional[str] = None
+    """Datos para crear un proveedor en el sistema."""
+    nombre: Optional[str] = Field(None, description="Nombre o razón social del proveedor")
+    nit: Optional[str] = Field(None, description="Número de identificación tributaria (NIT) del proveedor")
+    direccion: Optional[str] = Field(None, description="Dirección física del proveedor")
+    telefono: Optional[str] = Field(None, description="Número de teléfono de contacto del proveedor")
 
 class PayloadCreateProduct(BaseModel):
     nombre: str = Field(..., description="Nombre del producto", max_length=200)
@@ -16,28 +17,46 @@ class PayloadCreateProduct(BaseModel):
     proveedor: Optional[str] = Field(None, description="Nombre o NIT del proveedor del producto")
 
 class PayloadCreateClient(BaseModel):
-    nombre: str = Field(..., description="Nombre del cliente")
-    nit: str = Field(..., description="NIT del cliente")
-    direccion: str = Field(..., description="Dirección del cliente")
+    """Datos para crear un cliente en el sistema."""
+    nombre: str = Field(..., description="Nombre completo o razón social del cliente")
+    nit: str = Field(..., description="Número de identificación tributaria (NIT) o documento de identidad del cliente")
+    direccion: str = Field(..., description="Dirección física o de correspondencia del cliente")
 
 
 class UserIntention(BaseModel):
     """
-    Modelo de salida estructurada: intención + payload correspondiente.
+    Modelo de salida estructurada: intención del usuario + datos extraídos del mensaje o archivos adjuntos.
+    Este modelo captura tanto la intención del usuario como los datos necesarios para ejecutar esa intención,
+    ya sea extraídos del texto, de imágenes (facturas), o de audio.
     """
     userintention: Literal["create_provider", "create_client", "create_product", "other", "none", "bye"] = Field(
         ...,
         description=(
-            "'create_provider': cuando el usuario quiere crear un proveedor. "
-            "'create_client': cuando el usuario quiere crear un cliente. "
-            "'create_product': cuando el usuario quiere crear un producto. "
-            "'other': conversación casual u otro propósito."
+            "Intención detectada del usuario. Valores posibles:\n"
+            "- 'create_provider': crear un proveedor (datos pueden venir del texto o de una factura)\n"
+            "- 'create_client': crear un cliente\n"
+            "- 'create_product': crear uno o más productos (datos pueden venir del texto o de items de factura)\n"
+            "- 'other': conversación casual u otro propósito\n"
+            "- 'none': sin intención clara\n"
+            "- 'bye': despedida"
         )
     )
-    payload_provider: Optional[PayloadCreateProvider] = None
-    payload_client: Optional[PayloadCreateClient] = None
-    payload_product: Optional[PayloadCreateProduct] = None
-    audio_transcription: Optional[str] = None
+    payload_provider: Optional[PayloadCreateProvider] = Field(
+        None, 
+        description="Datos del proveedor a crear. Se llena automáticamente si hay una factura en la imagen (usando datos del emisor) o si el usuario proporciona los datos por texto/audio"
+    )
+    payload_client: Optional[PayloadCreateClient] = Field(
+        None,
+        description="Datos del cliente a crear. Se llena si el usuario proporciona los datos por texto/audio"
+    )
+    payload_product: Optional[PayloadCreateProduct] = Field(
+        None,
+        description="Datos del producto a crear. Se llena automáticamente si hay una factura en la imagen (usando el primer item) o si el usuario proporciona los datos por texto/audio"
+    )
+    audio_transcription: Optional[str] = Field(
+        None,
+        description="Transcripción del audio si el usuario envió un mensaje de voz"
+    )
 
 class Emisor(BaseModel):
     """Representa al emisor de la factura."""

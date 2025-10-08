@@ -3,6 +3,8 @@ from fastapi_utils.cbv import cbv
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage , AIMessage
 import os
+import base64
+from pathlib import Path
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from ai.schemas.facturas import FacturaColombiana, UserIntention   
@@ -134,6 +136,31 @@ class ChatWebService02:
         #        lines.append(f"Sistema: {msg.content}")
         return "\n".join(lines)
     
+    def _read_file_to_base64(self, file_path: str) -> str:
+        """Read a file from the given path and return it as a base64 encoded string.
+        
+        Args:
+            file_path: Path to the file to read
+            
+        Returns:
+            Base64 encoded string of the file contents
+            
+        Raises:
+            HTTPException if the file cannot be read
+        """
+        try:
+            path = Path(file_path)
+            if not path.exists():
+                raise HTTPException(status_code=400, detail=f"File not found: {file_path}")
+            
+            with open(path, "rb") as file:
+                file_bytes = file.read()
+                return base64.b64encode(file_bytes).decode('utf-8')
+                
+        except Exception as e:
+            print(f"❌ Error reading file {file_path}: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
+    
     def _save_product(self, payload):
         """Save a product to the database using the extracted payload."""
         session = SessionLocal()
@@ -221,45 +248,207 @@ class ChatWebService02:
         finally:
             session.close()
     
+    def _extract_invoice_from_image(self, llm, message_content):
+        """Extract invoice data from an image using structured output.
+        
+        Args:
+            llm: The language model instance
+            message_content: List with text and image_url content
+            
+        Returns:
+            FacturaColombiana object or None if extraction fails
+        """
+        try:
+            # Create a model with structured output for invoice extraction
+            model_with_invoice_structure = llm.with_structured_output(FacturaColombiana)
+            
+            # Instruction for invoice extraction (following Colab pattern)
+            invoice_extraction_message = HumanMessage(content=[
+                {"type": "text", "text": "Analizar la imagen y extraer los datos de la factura según el schema proporcionado. Si la imagen no contiene una factura, responde con datos vacíos o nulos."},
+                message_content[1]  # The image_url content
+            ])
+            
+            # Extract invoice data
+            invoice_data = model_with_invoice_structure.invoke([invoice_extraction_message])
+            
+            print("=============== INVOICE EXTRACTION RESULT ===============")
+            print(f"Invoice Number: {invoice_data.numeroFactura}")
+            print(f"Date: {invoice_data.fechaEmision}")
+            print(f"Total: {invoice_data.total}")
+            print(f"Emisor: {invoice_data.emisor}")
+            print(f"Items count: {len(invoice_data.items)}")
+            print("=========================================================")
+            
+            return invoice_data
+            
+        except Exception as e:
+            print(f"⚠️ Failed to extract invoice data: {str(e)}")
+            return None
+    
+    def _enrich_intention_with_invoice(self, result, invoice_data):
+        """Enrich the detected intention with invoice data if applicable.
+        
+        Simple approach: If user wants to create provider/product and we have invoice data,
+        populate the payloads with invoice information.
+        
+        Args:
+            result: UserIntention object from LLM
+            invoice_data: FacturaColombiana object from image extraction
+            
+        Returns:
+            UserIntention object with enriched payloads
+        """
+        if not invoice_data:
+            return result
+        
+        from ai.schemas.facturas import PayloadCreateProvider, PayloadCreateProduct
+        
+        # If intention is create_provider and we have invoice data, use emisor data
+        if result.userintention == "create_provider":
+            print("📝 Enriching provider payload with invoice emisor data...")
+            result.payload_provider = PayloadCreateProvider(
+                nombre=invoice_data.emisor.razonSocial,
+                nit=invoice_data.emisor.nit
+            )
+            print(f"✅ Provider payload enriched: {result.payload_provider.nombre}")
+        
+        # If intention is create_product and we have invoice items, use first item
+        elif result.userintention == "create_product" and invoice_data.items:
+            print("📝 Enriching product payload with invoice item data...")
+            first_item = invoice_data.items[0]
+            
+            # Calculate price from item data
+            precio = first_item.precioUnitario if first_item.precioUnitario else (
+                first_item.subtotal / first_item.cantidad if first_item.subtotal and first_item.cantidad > 0 else 0
+            )
+            
+            result.payload_product = PayloadCreateProduct(
+                nombre=first_item.descripcion[:200],  # Truncate to max length
+                precio_venta=precio,
+                cantidad=int(first_item.cantidad),
+                proveedor=invoice_data.emisor.nit  # Link to provider by NIT
+            )
+            print(f"✅ Product payload enriched: {result.payload_product.nombre}")
+        
+        return result
+    
     # --- v1.1: Clasificación de intención + extracción y registro de distribuidor ---
     @chat_webservice_api_router_02.post("/api/chat_v2.0")
     async def chat_with_structure_output(self, request: ChatRequestDTO):
         global GOOGLE_API_KEY
         llm = init_chat_model("gemini-2.0-flash", model_provider="google_genai",  api_key=self.GOOGLE_API_KEY)
-
-
+        print("=========REQUEST=========")
+        print(request)
+        print("=========================")
         conversation = self.find_conversation(request.user_id)
 
         # Registrar el mensaje actual en memoria y construir historial
         user_input = request.message
-        conversation.append(HumanMessage(content=user_input))
+        
+        # Build message content - can be text only or multimodal (text + image/audio)
+        message_content = []
+        
+        # Always add the text message
+        message_content.append({"type": "text", "text": user_input})
+        
+        # Process file if present
+        has_image = False
+        has_audio = False
+        file_base64 = None
+        
+        if request.file_path and request.mime_type:
+            # Read the file from the provided path and convert to base64
+            file_base64 = self._read_file_to_base64(request.file_path)
+            file_url = f"data:{request.mime_type};base64,{file_base64}"
+            
+            # Handle image files
+            if request.mime_type.startswith("image/"):
+                has_image = True
+                message_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": file_url}
+                })
+                print(f"📸 Image received from path: {request.file_path}, MIME type: {request.mime_type}")
+            
+            # Handle audio files - use 'media' type as per LangChain requirements
+            elif request.mime_type.startswith("audio/"):
+                has_audio = True
+                message_content.append({
+                    "type": "media",
+                    "mime_type": request.mime_type,
+                    "data": file_base64
+                })
+                print(f"🎤 Audio received from path: {request.file_path}, MIME type: {request.mime_type}")
+            
+            else:
+                print(f"⚠️ Unsupported MIME type: {request.mime_type}")
+        
+        # Create the human message with content (text or multimodal)
+        # If only text, use simple string format for better compatibility with history
+        if len(message_content) == 1:
+            conversation.append(HumanMessage(content=user_input))
+        else:
+            conversation.append(HumanMessage(content=message_content))
 
         
         history_text = self._history_as_text(request.user_id)
+        
+        # Extract invoice data if image is present (following Colab pattern)
+        invoice_data = None
+        if has_image:
+            print("🔍 Attempting to extract invoice data from image...")
+            invoice_data = self._extract_invoice_from_image(llm, message_content)
 
         # Usar el modelo Pydantic para clasificación de intención
         model_with_structure = llm.with_structured_output(UserIntention)
 
         # Clasificación de intención basada en el prompt del Colab
-        classify_text = (
-            "Eres un asistente para gestión comercial.\n"
+        media_context = ""
+        if has_image:
+            media_context += "\nNOTA: El usuario adjuntó una imagen (posiblemente una factura). Los datos de la imagen se extraerán automáticamente."
+        if has_audio:
+            media_context += "\nNOTA: El usuario envió un mensaje de audio. Escucha y transcribe el audio, luego clasifica la intención."
+        
+        classify_instruction = (
+            "Eres un asistente de voz para gestión comercial.\n"
             "Clasifica la intención del usuario y extrae los datos mencionados según el schema.\n"
             "Intenciones disponibles: create_provider, create_client, create_product, other, none, bye.\n"
-            "- 'create_provider': cuando el usuario quiere crear un proveedor\n"
+            "- 'create_provider': cuando el usuario quiere crear un proveedor (puede venir de texto, audio o factura)\n"
             "- 'create_client': cuando el usuario quiere crear un cliente\n"
-            "- 'create_product': cuando el usuario quiere crear un producto\n"
+            "- 'create_product': cuando el usuario quiere crear un producto (puede venir de texto, audio o factura)\n"
             "- 'other': conversación casual u otro propósito\n"
             "- 'none': sin intención clara\n"
-            "- 'bye': despedida\n\n"
+            "- 'bye': despedida\n"
+            f"{media_context}\n\n"
             f"Historial:\n{history_text}\n\n"
-            f"Último mensaje del usuario: {user_input}"
+            f"Último mensaje del usuario: {user_input}\n"
+            "Si hay audio o imagen, analízalos y extrae la información correspondiente. "
+            "Si hay audio, incluye la transcripción en 'audio_transcription'."
         )
 
-        result = model_with_structure.invoke(classify_text)
+        # If we have audio or image, pass them to the classification model
+        if has_audio or has_image:
+            # Build multimodal classification message
+            classification_content = [{"type": "text", "text": classify_instruction}]
+            
+            # Add audio/image from message_content (skip the first item which is the user text)
+            for content_item in message_content[1:]:
+                classification_content.append(content_item)
+            
+            classification_message = HumanMessage(content=classification_content)
+            result = model_with_structure.invoke([classification_message])
+        else:
+            # Text-only classification
+            result = model_with_structure.invoke(classify_instruction)
+        
+        if invoice_data:
+            print("🔄 Enriching intention with invoice data...")
+            result = self._enrich_intention_with_invoice(result, invoice_data)
         
         # Imprimir resultado de detección de intención
         print("=============== INTENTION DETECTION RESULT ===============")
         print(f"User Intention: {result.userintention}")
+        print(f"Audio Transcription: {result.audio_transcription if has_audio else 'N/A'}")
         print(f"Payload Provider: {result.payload_provider}")
         print(f"Payload Client: {result.payload_client}")
         print(f"Payload Product: {result.payload_product}")
@@ -311,6 +500,7 @@ class ChatWebService02:
         return {
             "userintention": result.userintention,
             "reply": reply,
+            "audio_transcription": result.audio_transcription if has_audio else None,
             "payload_provider": result.payload_provider.model_dump() if result.payload_provider else None,
             "payload_client": result.payload_client.model_dump() if result.payload_client else None,
             "payload_product": result.payload_product.model_dump() if result.payload_product else None,
@@ -323,6 +513,9 @@ class ChatWebService02:
             "client_saved": client_saved_successfully,
             "saved_client_id": saved_client.id if saved_client else None,
             "saved_client_name": saved_client.razon_social if saved_client else None,
+            "has_image": has_image,
+            "has_audio": has_audio,
+            "invoice_data": invoice_data.model_dump() if invoice_data else None,
         }
 
         
