@@ -13,11 +13,17 @@ import {
 
 
 //import makeWASocket, { downloadMediaMessage } from "@whiskeysockets/baileys"
-import {createWriteStream} from "fs";
+import {createWriteStream, readFileSync} from "fs";
 
 
 import { rmSync, existsSync } from "fs";
 import { join } from "path";
+
+
+function fileToBase64(path: string): string {
+  const fileBuffer = readFileSync(path);
+  return fileBuffer.toString('base64');
+}
 
 
 class WhatsAppHandler {
@@ -159,7 +165,7 @@ class WhatsAppHandler {
               message: message,
               user_id: msg.key.remoteJid,
               mime_type: mime_type,
-              file_path: mime_type ? filename : null
+              file_base64: mime_type ? fileToBase64(filename) : null
             }),
             redirect: "follow",
           })
