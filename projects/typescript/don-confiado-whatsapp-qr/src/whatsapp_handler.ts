@@ -18,6 +18,7 @@ import {createWriteStream, readFileSync} from "fs";
 
 import { rmSync, existsSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 
 
 function fileToBase64(path: string): string {
@@ -110,10 +111,10 @@ class WhatsAppHandler {
           
           if (messageType === 'imageMessage') {
             mime_type = msg.message.imageMessage.mimetype;
-            filename = "/tmp/downloaded-image." + mime_type.split('/')[1];
+            filename = join(tmpdir(), "downloaded-image." + mime_type.split('/')[1]);
              
             // download the media as a stream
-            const stream = await this.downloadMediaMessage(
+            const stream = await downloadMediaMessage(
                 msg,
                 'stream',
                 {},
@@ -128,7 +129,7 @@ class WhatsAppHandler {
           }
           if (messageType === 'audioMessage') {
             mime_type = msg.message.audioMessage.mimetype;
-            filename = "/tmp/downloaded-audio." + mime_type.split('/')[1];
+            filename = join(tmpdir(), "downloaded-audio." + mime_type.split('/')[1]);
 
             const stream = await downloadMediaMessage(
               msg,
@@ -141,7 +142,7 @@ class WhatsAppHandler {
             );
   
             // save the audio file locally and wait for it to finish
-            await downloadAndSaveMedia(stream, filename);
+            await this.downloadAndSaveMedia(stream, filename);
           }
 
           console.log(
