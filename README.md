@@ -143,3 +143,20 @@ create table public.terceros (
   )
 ) TABLESPACE pg_default;
 ```
+
+```sql
+create table public.productos (
+  id serial not null,
+  sku character varying(50) not null,
+  nombre character varying(200) not null,
+  precio_venta numeric(15, 2) not null,
+  cantidad integer not null default 0,
+  proveedor_id integer null,
+  fecha_creacion timestamp without time zone null default CURRENT_TIMESTAMP,
+  constraint productos_pkey primary key (id),
+  constraint productos_sku_key unique (sku),
+  constraint productos_proveedor_id_fkey foreign KEY (proveedor_id) references terceros (id),
+  constraint productos_cantidad_check check ((cantidad >= 0)),
+  constraint productos_precio_venta_check check ((precio_venta >= (0)::numeric))
+) TABLESPACE pg_default;
+```
