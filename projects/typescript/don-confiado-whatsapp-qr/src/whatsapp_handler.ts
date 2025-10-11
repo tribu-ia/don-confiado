@@ -65,6 +65,22 @@ class WhatsAppHandler {
 
     this.saveCreds();
   }
+
+  // Helper function to download and save media files
+   downloadAndSaveMedia = (stream: any, filepath: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const writeStream = createWriteStream(filepath);
+      stream.pipe(writeStream);
+      writeStream.on('finish', () => {
+        console.log(`✅ File saved successfully: ${filepath}`);
+        resolve();
+      });
+      writeStream.on('error', (err) => {
+        console.error(`❌ Error saving file: ${err}`);
+        reject(err);
+      });
+    });
+  }
   /**
    * Maneja los mensajes entrantes y los muestra en la consola.
    * @param m - El objeto de mensajes recibido.
@@ -80,6 +96,9 @@ class WhatsAppHandler {
       }
       
       try {
+        //----------------------------------------------------------
+        // PROCESAR MENSAJE 
+        //----------------------------------------------------------
         if (msg.message) {
           console.log("Mensaje recibido de:", msg.key.remoteJid);
 
@@ -89,28 +108,12 @@ class WhatsAppHandler {
           let filename = "";
           let img_caption = "";
           
-          // Helper function to download and save media files
-          const downloadAndSaveMedia = (stream: any, filepath: string): Promise<void> => {
-            return new Promise((resolve, reject) => {
-              const writeStream = createWriteStream(filepath);
-              stream.pipe(writeStream);
-              writeStream.on('finish', () => {
-                console.log(`✅ File saved successfully: ${filepath}`);
-                resolve();
-              });
-              writeStream.on('error', (err) => {
-                console.error(`❌ Error saving file: ${err}`);
-                reject(err);
-              });
-            });
-          };
-          
           if (messageType === 'imageMessage') {
             mime_type = msg.message.imageMessage.mimetype;
             filename = "/tmp/downloaded-image." + mime_type.split('/')[1];
              
             // download the media as a stream
-            const stream = await downloadMediaMessage(
+            const stream = await this.downloadMediaMessage(
                 msg,
                 'stream',
                 {},
@@ -121,7 +124,7 @@ class WhatsAppHandler {
             );
     
             // save the image file locally and wait for it to finish
-            await downloadAndSaveMedia(stream, filename);
+            await this.downloadAndSaveMedia(stream, filename);
           }
           if (messageType === 'audioMessage') {
             mime_type = msg.message.audioMessage.mimetype;
