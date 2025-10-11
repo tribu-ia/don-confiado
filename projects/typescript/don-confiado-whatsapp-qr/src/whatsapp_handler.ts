@@ -7,24 +7,9 @@ import {
   SocketConfig,
   WASocket,
   AuthenticationState,
-  downloadMediaMessage,
-  getContentType
 } from "baileys";
-
-
-//import makeWASocket, { downloadMediaMessage } from "@whiskeysockets/baileys"
-import {createWriteStream, readFileSync} from "fs";
-
-
 import { rmSync, existsSync } from "fs";
 import { join } from "path";
-
-
-function fileToBase64(path: string): string {
-  const fileBuffer = readFileSync(path);
-  return fileBuffer.toString('base64');
-}
-
 
 class WhatsAppHandler {
   private sock!: WASocket;
@@ -50,7 +35,7 @@ class WhatsAppHandler {
 
   constructor() {
     // Bind methods to this instance
-    this.saveCreds = async () => {};
+    this.saveCreds = null;
     this.onCredsUpdate = this.onCredsUpdate.bind(this);
     this.onMessagesUpsert = this.onMessagesUpsert.bind(this);
     this.onConnectionUpdate = this.onConnectionUpdate.bind(this);
@@ -65,85 +50,27 @@ class WhatsAppHandler {
 
     this.saveCreds();
   }
-
-  // Helper function to download and save media files
-   downloadAndSaveMedia = (stream: any, filepath: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const writeStream = createWriteStream(filepath);
-      stream.pipe(writeStream);
-      writeStream.on('finish', () => {
-        console.log(`✅ File saved successfully: ${filepath}`);
-        resolve();
-      });
-      writeStream.on('error', (err) => {
-        console.error(`❌ Error saving file: ${err}`);
-        reject(err);
-      });
-    });
-  }
   /**
    * Maneja los mensajes entrantes y los muestra en la consola.
    * @param m - El objeto de mensajes recibido.
    */
-  async onMessagesUpsert(message_array: any) {
-    console.log("--------------------[ sock.ev.on - messages.upsert ]-------------------------");
+  onMessagesUpsert(m: any) {
+    console.log(
+      "--------------------[ sock.ev.on - messages.upsert ]-------------------------"
+    );
     //console.log("message.upsert:", m);
-    for (const msg of message_array.messages) {
+    for (const msg of m.messages) {
       console.log("Mensaje recibido:\n", msg);
       if (msg.key.fromMe) {
-        console.log("\tIgnorando mensaje enviado por el propio cliente:",msg.key.remoteJid);
+        console.log(
+          "\tIgnorando mensaje enviado por el propio cliente:",
+          msg.key.remoteJid
+        );
         continue; // Ignorar mensajes enviados por el propio cliente
       }
-      
       try {
-        //----------------------------------------------------------
-        // PROCESAR MENSAJE 
-        //----------------------------------------------------------
         if (msg.message) {
           console.log("Mensaje recibido de:", msg.key.remoteJid);
-
-          const messageType = getContentType(msg.message);
-          console.log("Tipo de mensaje:", messageType);
-          let  mime_type = "";
-          let filename = "";
-          let img_caption = "";
-          
-          if (messageType === 'imageMessage') {
-            mime_type = msg.message.imageMessage.mimetype;
-            filename = "/tmp/downloaded-image." + mime_type.split('/')[1];
-             
-            // download the media as a stream
-            const stream = await this.downloadMediaMessage(
-                msg,
-                'stream',
-                {},
-                {
-                    logger: P({ level: "silent" }),
-                    reuploadRequest: this.sock.updateMediaMessage
-                }
-            );
-    
-            // save the image file locally and wait for it to finish
-            await this.downloadAndSaveMedia(stream, filename);
-          }
-          if (messageType === 'audioMessage') {
-            mime_type = msg.message.audioMessage.mimetype;
-            filename = "/tmp/downloaded-audio." + mime_type.split('/')[1];
-
-            const stream = await downloadMediaMessage(
-              msg,
-              'stream',
-              {},
-              {
-                  logger: P({ level: "silent" }),
-                  reuploadRequest: this.sock.updateMediaMessage
-              }
-            );
-  
-            // save the audio file locally and wait for it to finish
-            await downloadAndSaveMedia(stream, filename);
-          }
-
           console.log(
             "Contenido del mensaje:",
             msg.message.conversation ||
@@ -153,13 +80,11 @@ class WhatsAppHandler {
 
           this.sock.readMessages([msg.key]);
 
-          const message = msg.message.imageMessage?.caption ||
-                          msg.message.conversation ||
+          const message = msg.message.conversation ||
                           msg.message.extendedTextMessage?.text ||
                           "No texto disponible";
 
-
-          fetch("http://127.0.0.1:8000/api/chat_v2.0", {
+          fetch("http://127.0.0.1:8000/api/chat_v1.1", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -167,8 +92,6 @@ class WhatsAppHandler {
             body: JSON.stringify({
               message: message,
               user_id: msg.key.remoteJid,
-              mime_type: mime_type,
-              file_base64: mime_type ? fileToBase64(filename) : null
             }),
             redirect: "follow",
           })
@@ -177,13 +100,12 @@ class WhatsAppHandler {
               console.log("API response:", response);
 
               this.sock.sendMessage(msg.key.remoteJid, {
-                text: response.reply ?? "⚠️ No pude entender tu mensaje - juriel",
+                text: response.reply ?? "⚠️ No pude entender tu mensaje",
               });
             })
             .catch((error) => console.error(error));
         }
       } catch (error) {
-        console.log(error);
         console.error("Error al obtener el ID del mensaje:", msg);
       }
       console.log(
@@ -214,8 +136,8 @@ class WhatsAppHandler {
   }
 
   async onConnectionUpdateClose(
-    connection: string | undefined,
-    lastDisconnect: { error: any } | undefined
+    connection: string,
+    lastDisconnect: { error: any }
   ) {
     console.log(
       "❌ Conexión cerrada",
@@ -246,7 +168,7 @@ class WhatsAppHandler {
     }
   }
   async onConnectionUpdate(update: {
-    connection?: string;
+    connection: string;
     lastDisconnect?: { error: any };
     qr?: string;
   }) {

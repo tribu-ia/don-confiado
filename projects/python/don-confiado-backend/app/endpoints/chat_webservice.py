@@ -56,7 +56,8 @@ class ChatWebService:
             os.environ["GOOGLE_API_KEY"] = api_key
 
         # Modelo y prompt del sistema
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+        # llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash") # Modelo Original
+        llm = ChatGoogleGenerativeAI(model="learnlm-2.0-flash-experimental")
 
         system_prompt = """ROLE:
             Don Confiado, un asistente de inteligencia artificial que actúa como un asesor

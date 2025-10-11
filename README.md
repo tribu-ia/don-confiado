@@ -69,7 +69,7 @@ curl -X POST http://127.0.0.1:8000/api/chat_v1.1 \
 
 Notas:
 - Si no defines `GOOGLE_API_KEY`, el backend te lo pedirá por consola la primera vez.
-- Para crear distribuidores en Supabase, debes definir `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY`.
+- cls
 
 ## Servicio WhatsApp QR (TypeScript)
 
