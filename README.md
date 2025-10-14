@@ -153,6 +153,8 @@ create table public.productos (
   cantidad integer not null default 0,
   proveedor_id integer null,
   fecha_creacion timestamp without time zone null default CURRENT_TIMESTAMP,
+  presentacion character varying(300) null,
+  descripcion text null,
   constraint productos_pkey primary key (id),
   constraint productos_sku_key unique (sku),
   constraint productos_proveedor_id_fkey foreign KEY (proveedor_id) references terceros (id),
