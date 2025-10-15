@@ -24,7 +24,7 @@ chat_clase_03_api_router = APIRouter()
 # Constants
 # Google GenAI embeddings expect fully-qualified model id: "models/text-embedding-004"
 EMBEDDING_MODEL_NAME = "models/text-embedding-004"  # 768-dim as of Google GenAI
-EMBEDDING_DIM = 768
+EMBEDDING_DIM = 768 #dimensiones del embedding
 CHAT_MODEL_NAME = "gemini-2.5-flash"
 
 
@@ -34,13 +34,12 @@ DONCONFIADO_RAG_SYSTEM = (
     "Si la información no está en el contexto, dilo sin inventar."
 )
 
-
+# se encarga de asegurar que la extension pg_vector esté instalada en supabase
 def _ensure_pgvector_extension(session: Session) -> None:
     session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
-
+# creacion de las tablas de vector de productos
 def _create_vector_tables(session: Session) -> None:
-    # Productos
     session.execute(text(f"""
         CREATE TABLE IF NOT EXISTS productos_vec (
             id BIGSERIAL PRIMARY KEY,
@@ -75,24 +74,10 @@ def _create_vector_tables(session: Session) -> None:
         ON proveedores_vec USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
     """))
 
-    # Clientes
-    session.execute(text(f"""
-        CREATE TABLE IF NOT EXISTS clientes_vec (
-            id BIGSERIAL PRIMARY KEY,
-            source_id INTEGER REFERENCES terceros(id) ON DELETE CASCADE,
-            content TEXT,
-            embedding vector({EMBEDDING_DIM}),
-            metadata JSONB,
-            created_at TIMESTAMP DEFAULT NOW(),
-            UNIQUE (source_id)
-        );
-    """))
-    session.execute(text(f"""
-        CREATE INDEX IF NOT EXISTS idx_clientes_vec_embedding
-        ON clientes_vec USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
-    """))
+    # Clientes: eliminado
 
-
+# Chunking: Dividir textos largos en partes ("chunks") más pequeñas y solapadas facilita el procesamiento y la búsqueda semántica.
+# El sobrelapamiento ("overlap") entre chunks asegura contexto suficiente entre segmentos consecutivos.
 def _chunk_text(text_value: str, chunk_size: int = 600, overlap: int = 100) -> List[str]:
     if not text_value:
         return []
@@ -110,19 +95,19 @@ def _chunk_text(text_value: str, chunk_size: int = 600, overlap: int = 100) -> L
         start = max(0, end - overlap)
     return chunks
 
-
+# Convierte una lista de valores float a un string SQL válido para el vector
 def _arr_to_sql_vector(values: List[float]) -> str:
     # Build ARRAY[...]::vector(D)
     floats = ",".join(f"{v:.8f}" for v in values)
     return f"ARRAY[{floats}]::vector({EMBEDDING_DIM})"
 
-
+# Convierte una lista de textos a una lista de vectores
 def _embed_texts(emb: GoogleGenerativeAIEmbeddings, texts: List[str]) -> List[List[float]]:
     if not texts:
         return []
     return emb.embed_documents(texts)
 
-
+# Construye el contenido del producto
 def _build_product_content(row: Dict[str, Any]) -> str:
     proveedor_nombre = row.get("proveedor_nombre") or ""
     proveedor_desc = (
@@ -136,7 +121,7 @@ def _build_product_content(row: Dict[str, Any]) -> str:
         f"{proveedor_desc}"
     )
 
-
+# Construye el contenido del tercero
 def _build_tercero_content(row: Dict[str, Any]) -> str:
     nombre = row.get("razon_social") or (
         (row.get("nombres") or "") + " " + (row.get("apellidos") or "")
@@ -147,7 +132,8 @@ def _build_tercero_content(row: Dict[str, Any]) -> str:
         f"Dirección: {row.get('direccion') or ''}. Email: {row.get('email') or row.get('email_facturacion') or ''}."
     )
 
-
+# clase que se encarga de la configuración y el procesamiento de los datos
+# se incluye el decorador cbv para que se pueda usar como un endpoint de fastapi con las rutas definidas en el router 
 @cbv(chat_clase_03_api_router)
 class ChatClase03:
     def __init__(self):
@@ -160,6 +146,7 @@ class ChatClase03:
             google_api_key=self.google_api_key,
         )
 
+    # se encarga de asegurar que la extension pg_vector esté instalada en supabase y crear las tablas de vector de productos
     @chat_clase_03_api_router.post("/api/setup_pgvector")
     def setup_pgvector(self):
         session = SessionLocal()
@@ -174,6 +161,7 @@ class ChatClase03:
         finally:
             session.close()
 
+    # se encarga de sincronizar los embeddings de los productos, proveedores y clientes
     @chat_clase_03_api_router.post("/api/sync_embeddings")
     def sync_embeddings(self):
         session = SessionLocal()
@@ -240,29 +228,7 @@ class ChatClase03:
                     )
                     session.execute(sql, {"source_id": prov["id"], "chunk_index": idx, "content": chunk})
 
-            # Clientes (terceros tipo cliente)
-            clientes = session.execute(text(
-                """
-                SELECT id, tipo_documento, numero_documento, razon_social, nombres, apellidos,
-                       telefono_fijo, telefono_celular, direccion, email, email_facturacion
-                FROM terceros WHERE tipo_tercero = 'cliente'
-                """
-            )).mappings().all()
-            cli_texts = [_build_tercero_content(c) for c in clientes]
-            cli_vecs = _embed_texts(self.embeddings, cli_texts)
-            for row, vec, content in zip(clientes, cli_vecs, cli_texts):
-                sql = text(
-                    f"""
-                    INSERT INTO clientes_vec (source_id, content, embedding, metadata)
-                    VALUES (:source_id, :content, { _arr_to_sql_vector(vec) }, '{{}}'::jsonb)
-                    ON CONFLICT (source_id) DO UPDATE SET
-                        content = EXCLUDED.content,
-                        embedding = EXCLUDED.embedding,
-                        metadata = EXCLUDED.metadata,
-                        created_at = NOW();
-                    """
-                )
-                session.execute(sql, {"source_id": row["id"], "content": content})
+            # Clientes: eliminado
 
             session.commit()
             return {"ok": True, "message": "Embeddings sincronizados"}
@@ -272,6 +238,10 @@ class ChatClase03:
         finally:
             session.close()
 
+    # se encarga de buscar el contexto relevante para la pregunta del usuario
+    # <->: indica que se está usando la distancia euclidiana (L2) para medir la similitud entre el vector de la pregunta y el vector de los productos, proveedores y clientes
+    # <=>: indica que se está usando la distancia coseno para medir la similitud entre el vector de la pregunta y el vector de los productos, proveedores y clientes
+    # <#>: indica que se está usando la distancia del producto punto para medir la similitud entre el vector de la pregunta y el vector de los productos, proveedores y clientes
     def _search_context(self, session: Session, query_text: str, top_k: int = 8) -> List[Dict[str, Any]]:
         q_vec = self.embeddings.embed_query(query_text)
         q_vec_sql = _arr_to_sql_vector(q_vec)
@@ -283,9 +253,7 @@ class ChatClase03:
             UNION ALL
             SELECT 'proveedor' AS source, pr.source_id, pr.content, (pr.embedding <-> q.embedding) AS distance
             FROM proveedores_vec pr, q
-            UNION ALL
-            SELECT 'cliente' AS source, cv.source_id, cv.content, (cv.embedding <-> q.embedding) AS distance
-            FROM clientes_vec cv, q
+            -- clientes_vec eliminado
             ORDER BY distance ASC
             LIMIT :k
             """

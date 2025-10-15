@@ -11,7 +11,8 @@ Plataforma open-source para asistentes empresariales y automatizaciones. El repo
 - Node.js 18+
 - Yarn 1.x o 3.x
 - Cuenta/clave de Google Generative AI (Gemini): `GOOGLE_API_KEY`
-- (Opcional) Supabase: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+- Es obligatorio contar con una base de datos. Puede usar Supabase u otra cuenta de su preferencia.
+ - Postgres 14+ con extensión `pgvector`
 
 ## Estructura principal
 
@@ -22,59 +23,124 @@ Plataforma open-source para asistentes empresariales y automatizaciones. El repo
 
 1) Crear entorno y dependencias
 
-```bash
+### Windows (PowerShell)
+
+```powershell
 cd projects/python/don-confiado-backend/app
-python3 -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+./.venv/Scripts/Activate.ps1
 pip install -r requirements.txt
 ```
 
-2) Variables de entorno
-
-Crea un archivo `.env` en `projects/python/don-confiado-backend/app` con:
+### Windows (Git Bash)
 
 ```bash
+cd projects/python/don-confiado-backend/app
+python -m venv .venv
+source .venv/Scripts/activate
+pip install -r requirements.txt
+```
+
+### macOS / Linux (bash/zsh)
+
+```bash
+cd projects/python/don-confiado-backend/app
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Nota: 
+* Si ya cuentas con python instalado y te da un error que no se reconoce python3, intenta con python o py
+* Si estas ejecutando en powershell y no en bash es posible que te de un error que el comando source no existe
+
+2) Variables de entorno
+
+Crea un archivo `.env` en `projects/python/don-confiado-backend/app`:
+
+ - macOS/Linux/Windows (bash)
+   ```bash
+   touch .env
+   ```
+ - Windows (PowerShell)
+   ```powershell
+   New-Item -ItemType File .env -Force | Out-Null
+   ```
+
+
+## Ingresa las siguientes variables dentro de tu archivo .env (Recuerda que este archivo es privado y no deberias compartirlo)
+
 GOOGLE_API_KEY=tu_api_key_de_google
 # Opcional, requerido para registrar distribuidores
 SUPABASE_URL=tu_url_de_supabase
 SUPABASE_SERVICE_ROLE_KEY=tu_service_role_key
-```
 
-3) Ejecutar el servidor
+# Base de datos Postgres (usado por el backend FastAPI)
+donconfiado_db_user=usuario
+donconfiado_db_password=clave
+donconfiado_db_host=localhost
+donconfiado_db_port=port
+donconfiado_db_dbname=donconfiado
+
+
+### Base de datos (Supabase opcional)
+- Puedes usar Postgres propio o Supabase (recomendado por facilidad).
+- Si eliges Supabase, necesitas una cuenta y un proyecto. Desde el SQL Editor puedes ejecutar los scripts SQL de más abajo para crear las tablas `terceros` y `productos`.
+- Debes habilitar/instalar la extensión `pgvector` en tu base (en Supabase: Database → Extensions → activa `vector`).
+- Configura las variables `donconfiado_db_*` con las credenciales/host/puerto/base de tu instancia.
+
+3) Crear tablas base (SQL)
+
+- Antes de iniciar el servidor, crea las tablas de negocio.
+- Si usas Supabase, abre el SQL Editor y ejecuta los scripts del final de este README para `public.terceros` y `public.productos`.
+- Si usas Postgres propio, ejecuta esos mismos scripts en tu base.
+
+4) Ejecutar el servidor
 
 ```bash
-cd projects/python/don-confiado-backend/app
 python tribu-main.py
 # El servidor inicia en http://127.0.0.1:8000
 ```
 
-4) Probar endpoints (ejemplos)
-
-- Documentación interactiva (Swagger): `http://127.0.0.1:8000/docs`
-
-Chat con memoria en sesión:
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/chat_v1.0 \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"Hola, ¿quién eres?","user_id":"usuario-demo"}'
-```
-
-Clasificación + extracción + registro en Supabase:
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/chat_v1.1 \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"Quiero crear un proveedor NIT 900123456, Razón Social ACME","user_id":"usuario-demo"}'
+Windows (PowerShell) es igual:
+```powershell
+python tribu-main.py
 ```
 
 Notas:
 - Si no defines `GOOGLE_API_KEY`, el backend te lo pedirá por consola la primera vez.
 - Para crear distribuidores en Supabase, debes definir `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY`.
+ - Supabase es opcional: puedes usar cualquier Postgres con `pgvector`.
+ - Para evitar errores al iniciar: primero configura `.env` y crea las tablas base, luego arranca el servidor.
 
 ## Servicio WhatsApp QR (TypeScript)
 
 1) Instalar dependencias y ejecutar
 
+Instalar Yarn (si no lo tienes)
+
+- macOS/Linux (bash)
+  ```bash
+  corepack enable   # recomendado con Node 18+
+  # o alternativamente
+  npm install -g yarn
+  ```
+- Windows (PowerShell)
+  ```powershell
+  corepack enable   # recomendado con Node 18+
+  # o alternativamente
+  npm install -g yarn
+  ```
+
+### Windows (PowerShell)
+```powershell
+cd projects\typescript\don-confiado-whatsapp-qr
+yarn
+yarn tsx src/index.ts
+```
+
+### macOS / Linux (bash)
 ```bash
 cd projects/typescript/don-confiado-whatsapp-qr
 yarn
@@ -93,6 +159,8 @@ Sigue las instrucciones en la consola para escanear el QR. Revisa también el `R
 - Error por credenciales de Supabase: agrega `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` al `.env` del backend.
 - Error por `GOOGLE_API_KEY`: crea el `.env` con esa clave o proporciónala cuando el backend la solicite.
 - Puerto ocupado (8000): cierra el proceso previo o cambia el puerto en `tribu-main.py`.
+ - `pgvector` no encontrado: instala la extensión en tu base de datos y ejecuta el endpoint `/api/setup_pgvector`.
+ - Embeddings (Google) 400 por modelo: verifica que el backend use `models/text-embedding-004` y que `GOOGLE_API_KEY` esté vigente.
 
 ## SQL: Tabla `terceros` (Supabase/Postgres)
 
