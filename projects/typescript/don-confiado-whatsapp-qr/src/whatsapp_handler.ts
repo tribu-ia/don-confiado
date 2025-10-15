@@ -4,12 +4,12 @@ import {
   makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
-  SocketConfig,
   WASocket,
   AuthenticationState,
   downloadMediaMessage,
-  getContentType
-} from "baileys";
+  getContentType,
+  fetchLatestBaileysVersion
+} from "@whiskeysockets/baileys";
 
 
 //import makeWASocket, { downloadMediaMessage } from "@whiskeysockets/baileys"
@@ -41,7 +41,16 @@ class WhatsAppHandler {
       await useMultiFileAuthState("auth_info_baileys");
     this.authState = newState;
     this.saveCreds = newSaveCreds;
-    this.sock = makeWASocket({ auth: this.authState as AuthenticationState });
+
+    const { version } = await fetchLatestBaileysVersion();
+
+    this.sock = makeWASocket({
+      version,                      
+      printQRInTerminal: false,    
+      auth: this.authState,
+      browser: ["Ubuntu", "Chrome", "22.04.4"],
+      syncFullHistory: false,
+    });
     this.sock.ev.on("creds.update", this.onCredsUpdate.bind(this));
     this.sock.ev.on("messages.upsert", this.onMessagesUpsert.bind(this));
     this.sock.ev.on("connection.update", this.onConnectionUpdate.bind(this));
@@ -160,7 +169,7 @@ class WhatsAppHandler {
                           "No texto disponible";
 
 
-          fetch("http://127.0.0.1:8000/api/chat_v2.0", {
+          fetch("http://127.0.0.1:8000/api/chat_clase_03", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
