@@ -1,0 +1,36 @@
+# Core dependencies for Don Confiado Notebooks
+# Install with: pip install -r requirements.txt
+
+# Environment management
+python-dotenv>=1.0.0
+
+# AI/ML Libraries
+openai>=1.0.0
+google-genai>=0.3.0
+
+# LangChain ecosystem - using compatible versions
+langchain==0.3.27
+langchain-core==0.3.79
+langchain-openai==0.3.35
+langchain-google-genai==2.1.12
+langchain-community==0.3.31
+
+# Data processing
+pydantic>=2.0.0
+requests>=2.31.0
+networkx>=3.0.0
+matplotlib>=3.5.0
+
+# Jupyter notebook dependencies
+ipython>=8.0.0
+jupyter>=1.0.0
+ipykernel>=6.0.0
+
+# Image processing
+Pillow>=10.0.0
+
+# Audio processing (for voice features)
+pydub>=0.25.0
+
+# Additional utilities
+typing-extensions>=4.0.0
