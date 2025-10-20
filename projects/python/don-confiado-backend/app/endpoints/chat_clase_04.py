@@ -18,8 +18,7 @@ graphrag_api_router = APIRouter()
 class ChatClase04:
     def __init__(self):
         load_dotenv()
-        # If the user provided explicit env via notebook, keep as is
-        # Otherwise, rely on .env
+    
 
     @graphrag_api_router.post("/api/graphrag/setup_neo4j")
     def setup_neo4j(self):
@@ -39,7 +38,6 @@ class ChatClase04:
                 raise HTTPException(status_code=400, detail="Provide a PDF or text")
 
             if pdf is not None:
-                # Save to temp file for processing
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                     data = await pdf.read()
                     tmp.write(data)
