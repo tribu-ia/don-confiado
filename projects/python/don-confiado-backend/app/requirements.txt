@@ -14,3 +14,5 @@ langchain-google-genai>=1.0.7
 langchain>=0.3.0
 SQLAlchemy
 psycopg2-binary
+neo4j>=5.24.0
+pypdf>=4.3.1
