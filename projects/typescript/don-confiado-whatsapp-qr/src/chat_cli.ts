@@ -1,27 +1,34 @@
 import readline from "readline";
 
 type ChatResponse = {
+    answer?: string;
     reply?: string;
     [key: string]: unknown;
 };
 
 async function callBackend(message: string, userId: string): Promise<ChatResponse> {
-    const endpoint = process.env.BACKEND_URL || "http://127.0.0.1:8000/api/chat_v2.0";
-    const response = await fetch(endpoint, {
+    const endpoint = process.env.BACKEND_URL || "http://127.0.0.1:8000/api/graphrag/enhanced/ask";
+    const params = new URLSearchParams({
+        query: message,
+        retrieval_method: "hybrid",
+        top_k: "5",
+        use_graphrag: "true"
+    });
+    
+    const response = await fetch(`${endpoint}?${params}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, user_id: userId })
+        headers: { "Content-Type": "application/json" }
     });
     if (!response.ok) {
         throw new Error(`Backend error: ${response.status} ${response.statusText}`);
     }
-    return response.json();
+    return response.json() as Promise<ChatResponse>;
 }
 
 async function main() {
     const userId = process.env.USER_ID || "cli-user";
     console.log("Simple Chat CLI (type 'exit' to quit)");
-    console.log(`Using backend: ${process.env.BACKEND_URL || "http://127.0.0.1:8000/api/chat_v2.0"}`);
+    console.log(`Using backend: ${process.env.BACKEND_URL || "http://127.0.0.1:8000/api/graphrag/enhanced/ask"}`);
 
     const rl = readline.createInterface({
         input: process.stdin,
@@ -39,7 +46,7 @@ async function main() {
 
             try {
                 const result = await callBackend(text, userId);
-                const reply = result.reply ?? "(no reply)";
+                const reply = result.answer ?? "(no reply)";
                 console.log(`Bot: ${reply}`);
             } catch (err: any) {
                 console.error(`Error: ${err?.message || String(err)}`);

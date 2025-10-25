@@ -169,13 +169,24 @@ class WhatsAppHandler {
                           "No texto disponible";
 
 
-          fetch("http://127.0.0.1:8000/api/chat_clase_03", {
+          const params = new URLSearchParams({
+            query: message,
+            retrieval_method: "hybrid",
+            top_k: "5",
+            use_graphrag: "true"
+          });
+          
+          fetch(`http://127.0.0.1:8000/api/graphrag/enhanced/ask?${params}`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
+            
             body: JSON.stringify({
               message: message,
+              retrieval_method: "hybrid",
+              top_k: "5",
+              use_graphrag: "true",
               user_id: msg.key.remoteJid,
               mime_type: mime_type,
               file_base64: mime_type ? fileToBase64(filename) : null
@@ -187,7 +198,7 @@ class WhatsAppHandler {
               console.log("API response:", response);
 
               this.sock.sendMessage(msg.key.remoteJid, {
-                text: response.reply ?? "⚠️ No pude entender tu mensaje - juriel",
+                text: response.answer || response.reply || "⚠️ No pude entender tu mensaje - juriel",
               });
             })
             .catch((error) => console.error(error));

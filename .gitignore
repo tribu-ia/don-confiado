@@ -14,3 +14,6 @@ env*/
 .env.*
 !.env.example
 
+# Temporarily ignore notebooks directory
+notebooks/
+
