@@ -176,7 +176,7 @@ class WhatsAppHandler {
             use_graphrag: "true"
           });
           
-          fetch(`http://127.0.0.1:8000/api/chat_v3.0}`, {
+          fetch(`http://127.0.0.1:8000/api/chat_v3.0`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

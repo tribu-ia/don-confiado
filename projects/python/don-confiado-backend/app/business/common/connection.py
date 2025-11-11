@@ -14,7 +14,9 @@ PORT = os.getenv("donconfiado_db_port")
 DBNAME = os.getenv("donconfiado_db_dbname")
 
 DATABASE_URL = f"postgresql+psycopg2://{USER}:{PASSWORD}@{HOST}:{PORT}/{DBNAME}"
+print("------------------DATABASE_URL--------------------------")
 print(DATABASE_URL)
+print("--------------------------------------------")
 engine = create_engine(DATABASE_URL, echo=True)
 SessionLocal = sessionmaker(bind=engine)
 

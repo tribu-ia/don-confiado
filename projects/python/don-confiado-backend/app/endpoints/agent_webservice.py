@@ -13,6 +13,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import ConfigurableField
 from langchain_core.tools import tool
 from langchain.agents import create_tool_calling_agent, AgentExecutor
+from ai.agents.chatbot_agent.chatbot_agent import create_tools_array
+
 
 
 
@@ -175,9 +177,14 @@ class AgentWebService:
             print(c)
         print("=============================")
         
-        tools = []
+        tools = create_tools_array()
         prompt = prompt = ChatPromptTemplate.from_messages( 
-            [ ("system", DONCONFIADO_SYSTEM_PROMPT), ("placeholder", "{chat_history}"), ("human", "{input}"), ("placeholder", "{agent_scratchpad}"), ] )
+            [ 
+                ("system", DONCONFIADO_SYSTEM_PROMPT), 
+                ("placeholder", "{chat_history}"), 
+                ("human", "{input}"), 
+                ("placeholder", "{agent_scratchpad}"), 
+                ] )
         agent = create_tool_calling_agent(llm, tools,prompt=prompt)
         agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
         response = agent_executor.invoke({"input":request.message, "chat_history":conversation})
