@@ -169,7 +169,7 @@ class AgentWebService:
     # =============================================================================
     
     @agent_webservice_api_router.post("/api/chat_v3.0")
-    async def chat_with_structure_output(self, request: ChatRequestDTO):
+    async def process_incomming_message(self, request: ChatRequestDTO):
         """
         Main chat endpoint with intention detection and multimodal support.
         
