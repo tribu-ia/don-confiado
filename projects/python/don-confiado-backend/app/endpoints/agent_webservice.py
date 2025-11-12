@@ -119,8 +119,6 @@ class AgentWebService:
         print("*******************INITIALIZING CHAT WEB SERVICE**************")
         self.GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
         self.gemini_model = init_chat_model("gemini-2.0-flash", model_provider="google_genai",  api_key=self.GOOGLE_API_KEY)
-        print("GOOGLE_API_KEY IS ",type(self.GOOGLE_API_KEY))
-
 
         llm = init_chat_model("gemini-2.5-flash", model_provider="google_genai", api_key=self.GOOGLE_API_KEY)
         tools = create_tools_array()
@@ -182,7 +180,6 @@ class AgentWebService:
         Returns:
             Dict with chat response, detected intention, and saved entities
         """
-        # Initialize LLM
         
         print("=========REQUEST=========")
         print(request)
@@ -224,11 +221,10 @@ class AgentWebService:
         if "__interrupt__" in response:  #Manejo de interrupciones para aprobaciones humanas
             print("========= INTERRUPT DETECTED =========")
             print(response["__interrupt__"])
-
-            response_dto = {"answer": "Lo que quieres hacer requiere tu aprobación. Por favor, revisa la solicitud y apruébala para continuar."}
+            interrupt_message = """Lo que quieres hacer requiere tu aprobación. Responde si o yes para aprobar, o no o reject para rechazar."""
+            response_dto = {"answer":  interrupt_message }
             self._pending_approval[request.user_id] = response["__interrupt__"][0]
             return response_dto 
-        
 
         print("========= FUNCIONA  RESPONSE=========")
         conversation.append(response["messages"][-1])
