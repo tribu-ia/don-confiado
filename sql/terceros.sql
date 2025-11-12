@@ -18,17 +18,6 @@ CREATE TABLE terceros (
 );
 
 
-
-
-
-
-
-
-
-
-
-
-
 INSERT INTO terceros (tipo_documento, numero_documento, razon_social, tipo_tercero, telefono_fijo, telefono_celular, direccion, email, email_facturacion) VALUES ('NIT', '8001620351', 'TIGO COLOMBIA S.A.', 'proveedor', '6019587731', '3175860496', 'Calle 89 #49-43, Cali', 'contacto@tigo.com', 'facturacion@tigo.com');
 INSERT INTO terceros (tipo_documento, numero_documento, razon_social, tipo_tercero, telefono_fijo, telefono_celular, direccion, email, email_facturacion) VALUES ('NIT', '89090393812', 'POSTOBÓN S.A.', 'cliente', '6017590019', '3120766263', 'Calle 22 #7-32, Bogotá', 'contacto@postobón.com', 'facturacion@postobón.com');
 INSERT INTO terceros (tipo_documento, numero_documento, razon_social, tipo_tercero, telefono_fijo, telefono_celular, direccion, email, email_facturacion) VALUES ('NIT', '8909268033', 'CEMENTOS ARGOS S.A.', 'proveedor', '6017315897', '3356220159', 'Calle 2 #41-38, Pereira', 'contacto@cementos.com', 'facturacion@cementos.com');

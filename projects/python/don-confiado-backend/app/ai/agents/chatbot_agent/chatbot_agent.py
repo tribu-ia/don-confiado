@@ -67,19 +67,6 @@ def buscar_por_rango_de_precio(minimo: float, maximo: float) -> list[dict]:
     return resp
 
 
-# --- NUEVA TOOL: Detectar despedidas ---
-
-finalizar_chat = False
-
-@tool
-def detectar_despedida_tool(texto: str):
-    """Debes invocar esta tool cuando el usuario se despida ."""
-    global finalizar_chat
-    finalizar_chat = True
-    return True
-
-
-
 #---------------------------------------------------------
 @tool
 def buscar_terceros_tool(texto_busqueda: str,context: dict= None) -> list[dict]:
@@ -137,7 +124,6 @@ def create_tools_array():
     tools = [
         buscar_productos_tool,
         buscar_por_rango_de_precio,
-        detectar_despedida_tool,
         buscar_terceros_tool
     ]
     return tools  

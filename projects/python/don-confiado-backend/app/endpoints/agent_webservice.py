@@ -121,6 +121,8 @@ class AgentWebService:
         self.GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
         self.gemini_model = init_chat_model("gemini-2.0-flash", model_provider="google_genai",  api_key=self.GOOGLE_API_KEY)
 
+
+        #construct the LLM and tools and middleware
         self.llm = init_chat_model("gemini-2.5-flash", model_provider="google_genai", api_key=self.GOOGLE_API_KEY)
         self.tools = create_tools_array()
         self.middleware=[
@@ -132,7 +134,7 @@ class AgentWebService:
                 description_prefix="Tool execution pending approval",
             ),
         ]
-        
+
     # =============================================================================
     # CONVERSATION MANAGEMENT UTILITIES
     # =============================================================================
@@ -185,16 +187,19 @@ class AgentWebService:
         conversation = self.find_conversation(request.user_id)
         beauty_var_log("CURRENT CONVERSATION", conversation)
 
+        # Create agent
         self._agent = create_agent(model = self.llm, tools = self.tools)
         
-        conversation.append(HumanMessage(content=request.message))        # Add user message to conversation
+        # Add user message to conversation
+        conversation.append(HumanMessage(content=request.message))
         response = self._agent.invoke({"messages": conversation} , verbose=True)
-        beauty_var_log("AGENT RESPONSE", response)
 
-        conversation.append(response["messages"][-1])    # Add agent response to conversation
+        beauty_var_log("AGENT RESPONSE", response)
+        # Add agent response to conversation
+        conversation.append(response["messages"][-1])
        
         response_dto = ChatResponseDTO(answer=response["messages"][-1].content)
-        beauty_var_log("FINAL RESPONSE DTO", response_dto)        
+        beauty_var_log("FINAL RESPONSE DTO", response_dto)
         return response_dto
 
 
@@ -226,31 +231,42 @@ class AgentWebService:
 
         config = {"configurable": {"thread_id": request.user_id}} 
 
+
+        # Create agent with HITL middleware
         self._agent = create_agent(model = self.llm,tools = self.tools,middleware = self.middleware, checkpointer = self._inMemorySaver)
 
-        if request.user_id in self._pending_approval:  #Validamos si hay una aprobación pendiente
+        # Es una buena práctica descartar los casos fáciles
+        #Validamos si hay una aprobación pendiente
+        if request.user_id in self._pending_approval:  
             print("========= PREVIOUS STEP PENDING APPROVAL DETECTED =========")
+            # Se saca el request de aprobación pendiente para que no se procese de nuevo
             self._pending_approval.pop(request.user_id)
             response = None
-            if  request.message.lower() in ["yes", "approve", "aprove", "si", "sí", "y"]:
+            if  request.message.lower() in ["yes", "approve", "aprove", "abruebo", "si", "sí", "y"]:
                 response = self._agent.invoke(Command( resume={"decisions": [{"type": "approve"}] } ), config=config)
             else:
                 response = self._agent.invoke(Command( resume={"decisions": [{"type": "reject"}]} ), config=config)
 
             beauty_var_log("APPROVAL RESPONSE", response)            
             response_dto = ChatResponseDTO(answer=response["messages"][-1].content)
-            conversation.append(response["messages"][-1])  # Se agrega la respuesta del agente a la conversación          
+            # Se agrega la respuesta del agente a la conversación          
+            conversation.append(response["messages"][-1])  
             return response_dto
         
-        conversation.append(HumanMessage(content=request.message))        # Add user message to conversation        
+        # Add user message to conversation
+        conversation.append(HumanMessage(content=request.message))
         response = self._agent.invoke({"messages": conversation} ,config=config , verbose=True)
-        beauty_var_log("AGENT RESPONSE", response)        
-        if "__interrupt__" in response:  #Manejo de interrupciones para aprobaciones humanas
+        beauty_var_log("AGENT RESPONSE", response)
+
+        #Manejo de interrupciones para aprobaciones humanas
+        if "__interrupt__" in response:  
             print("========= INTERRUPT DETECTED (APPROVAL REQUIRED)=========")
             print(type(response['__interrupt__']),"\n",response["__interrupt__"])
             interrupt_message = """Lo que quieres hacer requiere tu aprobación. Responde *si* o *yes* para aprobar, o *no* o *reject* para rechazar."""
             interrupt_message += f"\n\nDetalle de la acción pendiente:\n{response['__interrupt__'][0].value["action_requests"][0]["description"]}"
             response_dto = ChatResponseDTO(answer=interrupt_message)
+
+            # Guardamos la solicitud de aprobación pendiente, para que en el siguiente llamado evalue la respuesta del usuario
             self._pending_approval[request.user_id] = response["__interrupt__"][0]
             return response_dto 
 

@@ -166,13 +166,6 @@ class WhatsAppHandler {
                           msg.message.extendedTextMessage?.text ||
                           "No texto disponible";
 
-
-          const params = new URLSearchParams({
-            query: message,
-            retrieval_method: "hybrid",
-            top_k: "5",
-            use_graphrag: "true"
-          });
           
           fetch(this.BACKEND_URL, {
             method: "POST",
