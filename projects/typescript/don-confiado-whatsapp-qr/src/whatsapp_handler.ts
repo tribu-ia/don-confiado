@@ -11,14 +11,11 @@ import {
   fetchLatestBaileysVersion
 } from "@whiskeysockets/baileys";
 
-
-//import makeWASocket, { downloadMediaMessage } from "@whiskeysockets/baileys"
 import {createWriteStream, readFileSync} from "fs";
-
-
 import { rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+
 
 
 function fileToBase64(path: string): string {
@@ -28,6 +25,7 @@ function fileToBase64(path: string): string {
 
 
 class WhatsAppHandler {
+  private  BACKEND_URL:string = `http://127.0.0.1:8000/api/chat_v3.1`;
   private sock!: WASocket;
   private qrAttempts = 0;
   private readonly maxQrAttempts = 3;
@@ -176,7 +174,7 @@ class WhatsAppHandler {
             use_graphrag: "true"
           });
           
-          fetch(`http://127.0.0.1:8000/api/chat_v3.0`, {
+          fetch(this.BACKEND_URL, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -195,7 +193,7 @@ class WhatsAppHandler {
               console.log("API response:", response);
 
               this.sock.sendMessage(msg.key.remoteJid, {
-                text: response.answer || response.reply || "⚠️ No pude entender tu mensaje - juriel",
+                text: response.answer || "☠️☠️☠️ ERROR en el backend  ☠️☠️☠️",
               });
             })
             .catch((error) => console.error(error));

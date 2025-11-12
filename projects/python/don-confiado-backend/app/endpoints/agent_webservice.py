@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 from fastapi_utils.cbv import cbv
 
-from .dto.message_dto import ChatRequestDTO
+from .dto.message_dto import ChatRequestDTO, ChatResponseDTO
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage , AIMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -19,6 +19,8 @@ from ai.agents.chatbot_agent.chatbot_agent import create_tools_array
 from langchain.agents import create_agent
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
+
+from logs.beauty_log import beauty_var_log
 
 
 
@@ -177,41 +179,23 @@ class AgentWebService:
         Returns:
             Dict with chat response, detected intention, and saved entities
         """
+        beauty_var_log("INCOMING REQUEST", request)
         
-        print("=========REQUEST=========")
-        print(request)
-        print("=========================")
-
-
-        
-        # Get or create conversation
         print("FINDING CONVERSATION FOR USER ID:", request.user_id)
         conversation = self.find_conversation(request.user_id)
-        config = {"configurable": {"thread_id": request.user_id}} 
-        print("Configurable", config)
+        beauty_var_log("CURRENT CONVERSATION", conversation)
 
-        print("=========CONVERSATION=========")
-        for c in conversation:
-            print(c)
-        print("=============================")
-
-
-        self._agent = create_agent(model = self.llm,tools = self.tools)
-
-        conversation.append(HumanMessage(content=request.message))        
+        self._agent = create_agent(model = self.llm, tools = self.tools)
         
-        response = self._agent.invoke({"messages": conversation} ,config=config , verbose=True)
+        conversation.append(HumanMessage(content=request.message))        # Add user message to conversation
+        response = self._agent.invoke({"messages": conversation} , verbose=True)
+        beauty_var_log("AGENT RESPONSE", response)
 
-        print("========= FUNCIONA  RESPONSE=========")
-        conversation.append(response["messages"][-1])
-        print(type(response))
-        print(response)
-        response_dto = {"answer": response["messages"][-1].content}
-        print("=========RESPONSE DTO=========")
-        print(response_dto)
-
+        conversation.append(response["messages"][-1])    # Add agent response to conversation
+       
+        response_dto = ChatResponseDTO(answer=response["messages"][-1].content)
+        beauty_var_log("FINAL RESPONSE DTO", response_dto)        
         return response_dto
-
 
 
     # =============================================================================
@@ -232,28 +216,20 @@ class AgentWebService:
         Returns:
             Dict with chat response, detected intention, and saved entities
         """
-        
-        print("=========REQUEST=========")
-        print(request)
-        print("=========================")
-
 
         
-        # Get or create conversation
+        beauty_var_log("INCOMING REQUEST", request)
+        
         print("FINDING CONVERSATION FOR USER ID:", request.user_id)
         conversation = self.find_conversation(request.user_id)
-        config = {"configurable": {"thread_id": request.user_id}} 
-        print("Configurable", config)
+        beauty_var_log("CURRENT CONVERSATION", conversation)
 
-        print("=========CONVERSATION=========")
-        for c in conversation:
-            print(c)
-        print("=============================")
+        config = {"configurable": {"thread_id": request.user_id}} 
 
         self._agent = create_agent(model = self.llm,tools = self.tools,middleware = self.middleware, checkpointer = self._inMemorySaver)
 
-        if request.user_id in self._pending_approval:
-            print("========= PENDING APPROVAL DETECTED =========")
+        if request.user_id in self._pending_approval:  #Validamos si hay una aprobación pendiente
+            print("========= PREVIOUS STEP PENDING APPROVAL DETECTED =========")
             self._pending_approval.pop(request.user_id)
             response = None
             if  request.message.lower() in ["yes", "approve", "aprove", "si", "sí", "y"]:
@@ -261,31 +237,25 @@ class AgentWebService:
             else:
                 response = self._agent.invoke(Command( resume={"decisions": [{"type": "reject"}]} ), config=config)
 
-            print("========= APPROVAL RESPONSE=========")
-            print(type(response))
-            response_dto = {"answer": response["messages"][-1].content}
-            conversation.append(response["messages"][-1])          
+            beauty_var_log("APPROVAL RESPONSE", response)            
+            response_dto = ChatResponseDTO(answer=response["messages"][-1].content)
+            conversation.append(response["messages"][-1])  # Se agrega la respuesta del agente a la conversación          
             return response_dto
-
         
-        conversation.append(HumanMessage(content=request.message))        
-        
+        conversation.append(HumanMessage(content=request.message))        # Add user message to conversation        
         response = self._agent.invoke({"messages": conversation} ,config=config , verbose=True)
-        
+        beauty_var_log("AGENT RESPONSE", response)        
         if "__interrupt__" in response:  #Manejo de interrupciones para aprobaciones humanas
-            print("========= INTERRUPT DETECTED =========")
-            print(response["__interrupt__"])
-            interrupt_message = """Lo que quieres hacer requiere tu aprobación. Responde si o yes para aprobar, o no o reject para rechazar."""
-            response_dto = {"answer":  interrupt_message }
+            print("========= INTERRUPT DETECTED (APPROVAL REQUIRED)=========")
+            print(type(response['__interrupt__']),"\n",response["__interrupt__"])
+            interrupt_message = """Lo que quieres hacer requiere tu aprobación. Responde *si* o *yes* para aprobar, o *no* o *reject* para rechazar."""
+            interrupt_message += f"\n\nDetalle de la acción pendiente:\n{response['__interrupt__'][0].value["action_requests"][0]["description"]}"
+            response_dto = ChatResponseDTO(answer=interrupt_message)
             self._pending_approval[request.user_id] = response["__interrupt__"][0]
             return response_dto 
 
         print("========= FUNCIONA  RESPONSE=========")
-        conversation.append(response["messages"][-1])
-        print(type(response))
-        print(response)
-        response_dto = {"answer": response["messages"][-1].content}
-        print("=========RESPONSE DTO=========")
-        print(response_dto)
-
+        conversation.append(response["messages"][-1])  # Add agent response to conversation        
+        response_dto = ChatResponseDTO(answer=response["messages"][-1].content)
+        beauty_var_log("APPROVAL RESPONSE", response_dto)
         return response_dto
