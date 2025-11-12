@@ -2,8 +2,12 @@ from langchain_core.tools import tool
 from langchain.tools import tool
 from sqlalchemy.orm import Session
 from sqlalchemy import or_ , and_
+from sqlalchemy.exc import IntegrityError, DataError
+from typing import Optional
 from business.entities.tercero import Tercero
 from business.entities.producto import Producto
+from business.dao.producto_dao import ProductoDAO
+from business.dao.tercero_dao import TerceroDAO
 from business.common.connection import SessionLocal
 
 
@@ -24,14 +28,19 @@ def buscar_productos_tool(texto_busqueda: str) -> list[dict]:
     """
     session: Session = SessionLocal()
     try:
+        producto_dao = ProductoDAO(session)
+        
         # Normalizar y dividir palabras clave
         palabras = [p.strip().lower() for p in texto_busqueda.split() if p]
-
-        # Construir filtro dinámico para que todas las palabras coincidan
         condiciones = [Producto.nombre.ilike(f"%{palabra}%") for palabra in palabras]
 
-        # Ejecutar la consulta
-        query = session.query(Producto).filter(and_(*condiciones)).limit(20).all()
+        # Ejecutar la consulta usando la sesión del DAO
+        query = (
+            producto_dao.session.query(Producto)
+            .filter(and_(*condiciones))
+            .limit(20)
+            .all()
+        )
 
         # Convertir resultados a dict
         resultados = []
@@ -59,12 +68,36 @@ def buscar_por_rango_de_precio(minimo: float, maximo: float) -> list[dict]:
     Busca productos por rango de precio
     """
 
-    global  productos
-    resp = []
-    for p in productos:
-      if minimo <= p["precio"]  and p["precio"] <= maximo:
-        resp.append(p)
-    return resp
+    session: Session = SessionLocal()
+    try:
+        producto_dao = ProductoDAO(session)
+        query = (
+            producto_dao.session.query(Producto)
+            .filter(
+                Producto.precio_venta >= minimo,
+                Producto.precio_venta <= maximo,
+            )
+            .limit(50)
+            .all()
+        )
+
+        resultados = []
+        for p in query:
+            resultados.append({
+                "id": p.id,
+                "sku": p.sku,
+                "nombre": p.nombre,
+                "precio_venta": float(p.precio_venta),
+                "cantidad": p.cantidad,
+                "proveedor_id": p.proveedor_id,
+                "proveedor": p.proveedor.razon_social if p.proveedor else None,
+            })
+
+        return resultados
+    except Exception as e:
+        return [{"error": str(e)}]
+    finally:
+        session.close()
 
 
 #---------------------------------------------------------
@@ -82,8 +115,9 @@ def buscar_terceros_tool(texto_busqueda: str,context: dict= None) -> list[dict]:
 
     session: Session = SessionLocal()
     try:
+        tercero_dao = TerceroDAO(session)
         query = (
-            session.query(Tercero)
+            tercero_dao.session.query(Tercero)
             .filter(
                 or_(
                     Tercero.nombres.ilike(f"%{texto_busqueda}%"),
@@ -117,6 +151,115 @@ def buscar_terceros_tool(texto_busqueda: str,context: dict= None) -> list[dict]:
     finally:
         session.close()
 
+@tool
+def crear_tercero_tool(
+    tipo_documento: str,
+    numero_documento: str,
+    tipo_tercero: str,
+    razon_social: Optional[str] = None,
+    nombres: Optional[str] = None,
+    apellidos: Optional[str] = None,
+    telefono_fijo: Optional[str] = None,
+    telefono_celular: Optional[str] = None,
+    direccion: Optional[str] = None,
+    email: Optional[str] = None,
+    email_facturacion: Optional[str] = None,
+) -> dict:
+    """
+    Crea un nuevo tercero en la base de datos.
+    Campos obligatorios: tipo_documento ('CC','NIT','CE'), numero_documento, tipo_tercero ('cliente','proveedor','empleado').
+    Retorna un diccionario con los datos del tercero creado o un error.
+    """
+    session: Session = SessionLocal()
+    try:
+        tercero_dao = TerceroDAO(session)
+        nuevo = Tercero(
+            tipo_documento=tipo_documento,
+            numero_documento=numero_documento,
+            tipo_tercero=tipo_tercero,
+            razon_social=razon_social,
+            nombres=nombres,
+            apellidos=apellidos,
+            telefono_fijo=telefono_fijo,
+            telefono_celular=telefono_celular,
+            direccion=direccion,
+            email=email,
+            email_facturacion=email_facturacion,
+        )
+        nuevo = tercero_dao.create(nuevo)
+        return {
+            "id": nuevo.id,
+            "tipo_documento": nuevo.tipo_documento,
+            "numero_documento": nuevo.numero_documento,
+            "razon_social": nuevo.razon_social,
+            "nombres": nuevo.nombres,
+            "apellidos": nuevo.apellidos,
+            "telefono_fijo": nuevo.telefono_fijo,
+            "telefono_celular": nuevo.telefono_celular,
+            "tipo_tercero": nuevo.tipo_tercero,
+            "direccion": nuevo.direccion,
+            "email": nuevo.email,
+            "email_facturacion": nuevo.email_facturacion,
+        }
+    except (IntegrityError, DataError) as e:
+        session.rollback()
+        return {"error": "No fue posible crear el tercero", "detalle": str(e)}
+    except Exception as e:
+        session.rollback()
+        return {"error": str(e)}
+    finally:
+        session.close()
+
+@tool
+def crear_producto_tool(
+    sku: str,
+    nombre: str,
+    precio_venta: float,
+    cantidad: int = 0,
+    proveedor_id: Optional[int] = None,
+) -> dict:
+    """
+    Crea un nuevo producto en la base de datos.
+    Campos obligatorios: sku, nombre, precio_venta.
+    Opcionales: cantidad (default 0), proveedor_id (FK a terceros.id).
+    Retorna un diccionario con los datos del producto creado o un error.
+    """
+    session: Session = SessionLocal()
+    try:
+        producto_dao = ProductoDAO(session)
+        tercero_dao = TerceroDAO(session)
+        
+        if proveedor_id is not None:
+            proveedor = tercero_dao.findById(proveedor_id)
+            if proveedor is None:
+                return {"error": f"Proveedor con id {proveedor_id} no existe"}
+
+        nuevo = Producto(
+            sku=sku,
+            nombre=nombre,
+            precio_venta=precio_venta,
+            cantidad=cantidad,
+            proveedor_id=proveedor_id,
+        )
+        nuevo = producto_dao.create(nuevo)
+
+        return {
+            "id": nuevo.id,
+            "sku": nuevo.sku,
+            "nombre": nuevo.nombre,
+            "precio_venta": float(nuevo.precio_venta),
+            "cantidad": nuevo.cantidad,
+            "proveedor_id": nuevo.proveedor_id,
+            "proveedor": nuevo.proveedor.razon_social if nuevo.proveedor else None,
+        }
+    except (IntegrityError, DataError) as e:
+        session.rollback()
+        return {"error": "No fue posible crear el producto", "detalle": str(e)}
+    except Exception as e:
+        session.rollback()
+        return {"error": str(e)}
+    finally:
+        session.close()
 
 
 def create_tools_array():
@@ -124,7 +267,9 @@ def create_tools_array():
     tools = [
         buscar_productos_tool,
         buscar_por_rango_de_precio,
-        buscar_terceros_tool
+        buscar_terceros_tool,
+        crear_tercero_tool,
+        crear_producto_tool,
     ]
     return tools  
 
