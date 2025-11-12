@@ -111,7 +111,6 @@ class AgentWebService:
 
     _conversations = {}
     _pending_approval = {}
-    _agent = None
     _inMemorySaver = InMemorySaver()
     
     def __init__(self):
@@ -120,20 +119,18 @@ class AgentWebService:
         self.GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
         self.gemini_model = init_chat_model("gemini-2.0-flash", model_provider="google_genai",  api_key=self.GOOGLE_API_KEY)
 
-        llm = init_chat_model("gemini-2.5-flash", model_provider="google_genai", api_key=self.GOOGLE_API_KEY)
-        tools = create_tools_array()
-        middleware=[
-        HumanInTheLoopMiddleware( 
-            interrupt_on={
-                "buscar_terceros_tool": True,  # All decisions (approve, edit, reject) allowed
-                "buscar_por_rango_de_precio": {"allowed_decisions": ["approve", "reject"]},  # No editing allowed
-            },
-            description_prefix="Tool execution pending approval",
-        ),
+        self.llm = init_chat_model("gemini-2.5-flash", model_provider="google_genai", api_key=self.GOOGLE_API_KEY)
+        self.tools = create_tools_array()
+        self.middleware=[
+            HumanInTheLoopMiddleware( 
+                interrupt_on={
+                    "buscar_terceros_tool": True,  # All decisions (approve, edit, reject) allowed
+                    "buscar_por_rango_de_precio": {"allowed_decisions": ["approve", "reject"]},  # No editing allowed
+                },
+                description_prefix="Tool execution pending approval",
+            ),
         ]
-        self._agent = create_agent(model = llm,tools = tools,middleware = middleware, checkpointer = self._inMemorySaver)
-
-
+        
     # =============================================================================
     # CONVERSATION MANAGEMENT UTILITIES
     # =============================================================================
@@ -198,6 +195,63 @@ class AgentWebService:
             print(c)
         print("=============================")
 
+
+        self._agent = create_agent(model = self.llm,tools = self.tools)
+
+        conversation.append(HumanMessage(content=request.message))        
+        
+        response = self._agent.invoke({"messages": conversation} ,config=config , verbose=True)
+
+        print("========= FUNCIONA  RESPONSE=========")
+        conversation.append(response["messages"][-1])
+        print(type(response))
+        print(response)
+        response_dto = {"answer": response["messages"][-1].content}
+        print("=========RESPONSE DTO=========")
+        print(response_dto)
+
+        return response_dto
+
+
+
+    # =============================================================================
+    # MAIN CHAT ENDPOINT HITL 
+    # =============================================================================
+    
+    @agent_webservice_api_router.post("/api/chat_v3.1")
+    async def process_incomming_message_hitl(self, request: ChatRequestDTO):
+        """
+        Main chat endpoint with intention detection and multimodal support.
+        
+        Handles text, audio, and image inputs with automatic data extraction
+        and entity creation (products, providers, clients).
+        
+        Args:
+            request: ChatRequestDTO with user message and optional file data
+            
+        Returns:
+            Dict with chat response, detected intention, and saved entities
+        """
+        
+        print("=========REQUEST=========")
+        print(request)
+        print("=========================")
+
+
+        
+        # Get or create conversation
+        print("FINDING CONVERSATION FOR USER ID:", request.user_id)
+        conversation = self.find_conversation(request.user_id)
+        config = {"configurable": {"thread_id": request.user_id}} 
+        print("Configurable", config)
+
+        print("=========CONVERSATION=========")
+        for c in conversation:
+            print(c)
+        print("=============================")
+
+        self._agent = create_agent(model = self.llm,tools = self.tools,middleware = self.middleware, checkpointer = self._inMemorySaver)
+
         if request.user_id in self._pending_approval:
             print("========= PENDING APPROVAL DETECTED =========")
             self._pending_approval.pop(request.user_id)
@@ -231,7 +285,7 @@ class AgentWebService:
         print(type(response))
         print(response)
         response_dto = {"answer": response["messages"][-1].content}
-        print("=========RESPONSE=========")
+        print("=========RESPONSE DTO=========")
         print(response_dto)
 
         return response_dto
