@@ -15,6 +15,7 @@ from langchain_core.tools import tool
 #from langchain.agents import create_tool_calling_agent, AgentExecutor
 from ai.agents.chatbot_agent.chatbot_agent import create_tools_array
 from langchain.agents import create_agent
+from langgraph.checkpoint.memory import InMemorySaver
 
 
 
@@ -136,7 +137,7 @@ class AgentWebService:
             return self._conversations[conversation_id]
         else:
             conversation = []
-            #conversation.append(SystemMessage(content=DONCONFIADO_SYSTEM_PROMPT))
+            conversation.append(SystemMessage(content=DONCONFIADO_SYSTEM_PROMPT))
             self._conversations[conversation_id] = conversation
             return conversation 
 
@@ -177,19 +178,14 @@ class AgentWebService:
         print("=============================")
         
         tools = create_tools_array()
-        prompt = prompt = ChatPromptTemplate.from_messages( 
-            [ 
-                ("system", DONCONFIADO_SYSTEM_PROMPT), 
-                ("placeholder", "{chat_history}"), 
-                ("human", "{input}"), 
-                ("placeholder", "{agent_scratchpad}"), 
-                ] )
-        #agent = create_tool_calling_agent(llm, tools,prompt=prompt)
-        agent = create_agent(model = llm,tools = tools,middleware = [])
-        #agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
-        #response = agent_executor.invoke({"input":request.message, "chat_history":conversation})
-        conversation.append(HumanMessage(content=request.message))
-        response = agent.invoke({"messages":conversation})
+        agent = create_agent(model = llm,tools = tools,middleware = [], checkpointer = InMemorySaver())
+        
+        conversation.append(HumanMessage(content=request.message))        
+        
+        config = {"configurable": {"thread_id": request.user_id}} 
+        print("Configurable", config)
+        response = agent.invoke({"messages": conversation},config=config , verbose=True)
+        
         print("========= FUNCIONA  RESPONSE=========")
         print(type(response))
         print(response)
@@ -197,8 +193,6 @@ class AgentWebService:
         print("=========RESPONSE=========")
         print(response_dto)
 
-        #conversation.append(HumanMessage(content=request.message))
-        #conversation.append(AIMessage(content=response["output"]))
 
         return response_dto
         
