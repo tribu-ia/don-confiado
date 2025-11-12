@@ -112,6 +112,7 @@ class AgentWebService:
     _conversations = {}
     _pending_approval = {}
     _agent = None
+    _inMemorySaver = InMemorySaver()
     
     def __init__(self):
         """Initialize the chat service with environment variables and conversation storage."""
@@ -119,23 +120,20 @@ class AgentWebService:
         self.GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
         self.gemini_model = init_chat_model("gemini-2.0-flash", model_provider="google_genai",  api_key=self.GOOGLE_API_KEY)
         print("GOOGLE_API_KEY IS ",type(self.GOOGLE_API_KEY))
+
+
         llm = init_chat_model("gemini-2.5-flash", model_provider="google_genai", api_key=self.GOOGLE_API_KEY)
         tools = create_tools_array()
-
         middleware=[
         HumanInTheLoopMiddleware( 
             interrupt_on={
                 "buscar_terceros_tool": True,  # All decisions (approve, edit, reject) allowed
                 "buscar_por_rango_de_precio": {"allowed_decisions": ["approve", "reject"]},  # No editing allowed
             },
-            # Prefix for interrupt messages - combined with tool name and args to form the full message
-            # e.g., "Tool execution pending approval: execute_sql with query='DELETE FROM...'"
-            # Individual tools can override this by specifying a "description" in their interrupt config
             description_prefix="Tool execution pending approval",
         ),
         ]
-
-        self._agent = create_agent(model = llm,tools = tools,middleware = middleware, checkpointer = InMemorySaver())
+        self._agent = create_agent(model = llm,tools = tools,middleware = middleware, checkpointer = self._inMemorySaver)
 
 
     # =============================================================================
@@ -161,8 +159,7 @@ class AgentWebService:
             return self._conversations[conversation_id]
         else:
             conversation = []
-            #conversation.append(SystemMessage(content=DONCONFIADO_SYSTEM_PROMPT))
-            conversation.append({"role": "system", "content": DONCONFIADO_SYSTEM_PROMPT})
+            conversation.append(SystemMessage(content=DONCONFIADO_SYSTEM_PROMPT))            
             self._conversations[conversation_id] = conversation
             return conversation 
 
@@ -197,47 +194,44 @@ class AgentWebService:
         print("FINDING CONVERSATION FOR USER ID:", request.user_id)
         conversation = self.find_conversation(request.user_id)
         config = {"configurable": {"thread_id": request.user_id}} 
-
+        print("Configurable", config)
 
         print("=========CONVERSATION=========")
         for c in conversation:
             print(c)
         print("=============================")
-        
-        
 
         if request.user_id in self._pending_approval:
             print("========= PENDING APPROVAL DETECTED =========")
-            approval_data = self._pending_approval.pop(request.user_id)
+            self._pending_approval.pop(request.user_id)
             response = None
             if  request.message.lower() in ["yes", "approve", "aprove", "si", "sí", "y"]:
-                response = self._agent.invoke(Command( resume={"decisions": [{"type": "approve"}], "messages": conversation } ), config=config)
+                response = self._agent.invoke(Command( resume={"decisions": [{"type": "approve"}] } ), config=config)
             else:
                 response = self._agent.invoke(Command( resume={"decisions": [{"type": "reject"}]} ), config=config)
-
 
             print("========= APPROVAL RESPONSE=========")
             print(type(response))
             response_dto = {"answer": response["messages"][-1].content}
-          
+            conversation.append(response["messages"][-1])          
             return response_dto
 
         
-        #conversation.append(HumanMessage(content=request.message))        
-        conversation.append({"role": "user", "content": request.message})
+        conversation.append(HumanMessage(content=request.message))        
         
-        
-        print("Configurable", config)
         response = self._agent.invoke({"messages": conversation} ,config=config , verbose=True)
         
-        if "__interrupt__" in response:
+        if "__interrupt__" in response:  #Manejo de interrupciones para aprobaciones humanas
             print("========= INTERRUPT DETECTED =========")
             print(response["__interrupt__"])
+
             response_dto = {"answer": "Lo que quieres hacer requiere tu aprobación. Por favor, revisa la solicitud y apruébala para continuar."}
             self._pending_approval[request.user_id] = response["__interrupt__"][0]
             return response_dto 
+        
+
         print("========= FUNCIONA  RESPONSE=========")
-        conversation.append({"role": "assistant", "content": response["messages"][-1].content}) 
+        conversation.append(response["messages"][-1])
         print(type(response))
         print(response)
         response_dto = {"answer": response["messages"][-1].content}
@@ -245,7 +239,3 @@ class AgentWebService:
         print(response_dto)
 
         return response_dto
-        
-        
-
-        
