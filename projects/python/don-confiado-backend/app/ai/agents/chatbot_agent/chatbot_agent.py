@@ -82,11 +82,17 @@ def detectar_despedida_tool(texto: str):
 
 #---------------------------------------------------------
 @tool
-def buscar_terceros_tool(texto_busqueda: str) -> list[dict]:
+def buscar_terceros_tool(texto_busqueda: str,context: dict= None) -> list[dict]:
     """
     Busca terceros por nombre, razón social o número de documento.
     Retorna una lista de diccionarios con la información encontrada.
     """
+
+    if context:
+        print("Contexto recibido en buscar_terceros_tool:", context)
+    else:
+        print("No se recibió contexto en buscar_terceros_tool.")
+
     session: Session = SessionLocal()
     try:
         query = (
