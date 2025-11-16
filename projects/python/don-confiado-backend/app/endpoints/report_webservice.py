@@ -6,6 +6,7 @@ import re
 from dotenv import load_dotenv
 from fastapi import APIRouter
 from fastapi_utils.cbv import cbv
+from pathlib import Path
 
 # DTOs
 from .dto.message_dto import ChatRequestDTO, ChatResponseDTO
@@ -413,7 +414,7 @@ Devuelve tu salida en este formato estricto:
 
     def node_adversarial_review(self, state: ReportState) -> ReportState:
         query = state.get("query") or ""
-        draft = state.get("report_draft") or ""
+        draft = state.get("improved_draft") or ""
         prompt = f"""Actúa como un evaluador externo adversarial (red-team) para un reporte de negocio.
 Tu objetivo es encontrar puntos débiles, supuestos no justificados, huecos de datos y riesgos.
 
@@ -473,7 +474,8 @@ Responde SOLO con:
             self._log("REFLECT START", {"user_id": state.get("user_id"), "review_notes_count": len(review_notes)})
             structured = self.llm.with_structured_output(ReflectionPatch)
             patch: ReflectionPatch = structured.invoke(prompt)
-            res = {"report_draft": patch.improved_draft}
+            # Clear previous review so the orchestrator routes to a fresh review next
+            res = {"report_draft": patch.improved_draft, "review_notes": []}
             self._log("REFLECT RESULT", {
                 "user_id": state.get("user_id"),
                 "structured": (patch.model_dump() if hasattr(patch, "model_dump") else patch.dict()),
@@ -483,7 +485,8 @@ Responde SOLO con:
         except Exception as e:
             beauty_var_log("REFLECT NODE STRUCTURED OUTPUT ERROR", {"error": str(e)})
             # Fallback: devolver el mismo borrador
-            res = {"report_draft": draft}
+            # Also clear review to force new review pass afterwards
+            res = {"report_draft": draft, "review_notes": []}
             self._log("REFLECT FALLBACK", {"user_id": state.get("user_id"), "draft_preview": self._sample(draft)})
             return res
 
@@ -555,5 +558,48 @@ Devuelve tu salida en el siguiente formato estricto:
 
         response_dto = ChatResponseDTO(answer=final_state.get("final_report", "No report available."))
         return response_dto
+
+    # =========================
+    # Graph Rendering Utility
+    # =========================
+    def render_workflow_graph(self) -> Dict[str, Any]:
+        """
+        Render the compiled LangGraph workflow to the app root.
+        - PNG (if graphviz/pygraphviz is available)
+        - Mermaid (.mmd) as a fallback-always
+        Returns a dict with saved paths (when available).
+        """
+        results: Dict[str, Any] = {}
+        try:
+            graph_obj = self._compiled_graph.get_graph()
+        except Exception as e:
+            self._log("GRAPH RENDER ERROR", {"error": str(e)})
+            return {"error": str(e)}
+
+        # App root: one level up from this endpoints directory
+        app_root = Path(__file__).resolve().parent.parent
+
+        # Try PNG
+        try:
+            if hasattr(graph_obj, "draw_png"):
+                png_path = app_root / "report_workflow_graph.png"
+                graph_obj.draw_png(str(png_path))
+                results["png"] = str(png_path)
+                self._log("GRAPH PNG SAVED", {"path": str(png_path)})
+        except Exception as e:
+            self._log("GRAPH PNG RENDER ERROR", {"error": str(e)})
+
+        # Mermaid fallback
+        try:
+            if hasattr(graph_obj, "draw_mermaid"):
+                mermaid_str = graph_obj.draw_mermaid()
+                mmd_path = app_root / "report_workflow_graph.mmd"
+                mmd_path.write_text(mermaid_str, encoding="utf-8")
+                results["mermaid"] = str(mmd_path)
+                self._log("GRAPH MERMAID SAVED", {"path": str(mmd_path)})
+        except Exception as e:
+            self._log("GRAPH MERMAID RENDER ERROR", {"error": str(e)})
+
+        return results
 
 
