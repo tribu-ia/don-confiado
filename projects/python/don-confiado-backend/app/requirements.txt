@@ -16,6 +16,7 @@ langchain-core>=0.3.0
 langchain-openai>=0.2.0
 langchain-google-genai>=1.0.7
 langchain-text-splitters>=0.1.0
+langgraph>=0.2.39
 
 # Graph database
 neo4j>=5.24.0
