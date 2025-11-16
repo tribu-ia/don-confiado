@@ -453,6 +453,7 @@ Devuelve tu salida en el siguiente formato estricto:
             self._log("ADVERSARIAL FALLBACK", {"user_id": state.get("user_id"), "severity": "low", "notes_count": len(critiques)})
             return res
 
+    #16/11/2025 Integra Nodo Reflexion
     def node_reflect_report(self, state: ReportState) -> ReportState:
         draft = state.get("report_draft") or ""
         review_notes = state.get("review_notes") or []
