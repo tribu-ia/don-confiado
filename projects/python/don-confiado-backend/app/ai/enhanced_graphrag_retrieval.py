@@ -121,7 +121,7 @@ def search_with_cypher_retriever(
         vector_cypher_retriever = VectorCypherRetriever(
             driver=driver,
             index_name=index_name,
-            cypher_query=cypher_query,
+            retrieval_query=cypher_query,  # Note: parameter is 'retrieval_query', not 'cypher_query'
             embedder=embedder
         )
         
@@ -165,7 +165,7 @@ def search_with_hybrid_retriever(
         cypher_retriever = VectorCypherRetriever(
             driver=driver,
             index_name=index_name,
-            cypher_query=queries["re_hops"],
+            retrieval_query=queries["re_hops"],  # Note: parameter is 'retrieval_query', not 'cypher_query'
             embedder=embedder
         )
         

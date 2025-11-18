@@ -18,8 +18,10 @@ from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph
 from langgraph.checkpoint.memory import InMemorySaver
 
-# Mock Tools
-from ai.tools.mock_data_tools import mock_supabase_query_tool, mock_neo4j_query_tool
+# Real Tools
+from ai.tools.supabase_tools import supabase_query_tool
+from ai.tools.neo4j_tools import neo4j_query_tool
+from ai.tools.neo4j_natural_language_tool import neo4j_natural_language_query
 
 # Logs
 from logs.beauty_log import beauty_var_log
@@ -125,7 +127,7 @@ class ReportWebService:
         # Nodes
         graph.add_node("security_check", self.node_security_check)
         graph.add_node("orchestrator", self.node_orchestrator)
-        graph.add_node("collect", self.node_collect_data_mock)
+        graph.add_node("collect", self.node_collect_data)
         graph.add_node("draft", self.node_draft_report)
         graph.add_node("reflect", self.node_reflect_report)
         graph.add_node("review", self.node_adversarial_review)
@@ -338,16 +340,100 @@ Responde SOLO con el siguiente JSON:
             self._log("ORCHESTRATOR FALLBACK", {"user_id": state.get("user_id"), **res})
             return res
 
-    def node_collect_data_mock(self, state: ReportState) -> ReportState:
-        # Mocked tools simulate successful data retrieval
+    def node_collect_data(self, state: ReportState) -> ReportState:
+        """
+        Collect data from Supabase and Neo4j using real tools.
+        Handles errors gracefully to allow workflow continuation.
+        """
         self._log("COLLECT START", {"user_id": state.get("user_id")})
-        supabase_data = mock_supabase_query_tool.invoke({"params": {"period": "last_30_days"}})
-        neo4j_data = mock_neo4j_query_tool.invoke({"query": "MATCH (c:Customer)-[r:PURCHASED]->(p:Product) RETURN c.name AS topCustomer, COUNT(r) AS purchases ORDER BY purchases DESC LIMIT 2", "params": {"limit": 2}})
+        
+        # Collect Supabase data
+        supabase_data = {}
+        try:
+            supabase_data = supabase_query_tool.invoke({"params": {"period": "last_30_days"}})
+            self._log("COLLECT SUPABASE SUCCESS", {
+                "user_id": state.get("user_id"),
+                "keys": list(supabase_data.keys()) if isinstance(supabase_data, dict) else []
+            })
+        except Exception as e:
+            self._log("COLLECT SUPABASE ERROR", {
+                "user_id": state.get("user_id"),
+                "error": str(e)
+            })
+            # Fallback to empty structure matching expected format
+            supabase_data = {
+                "orders": 0,
+                "revenue": 0.0,
+                "top_products": [],
+                "period": "last_30_days"
+            }
+        
+        # Collect Neo4j data using natural language query
+        neo4j_data = []
+        try:
+            # Get user query to generate relevant Neo4j data
+            user_query = state.get("query", "")
+            
+            # Build natural language query for Neo4j
+            # If user query is specific, use it; otherwise use a general query
+            if user_query and user_query.strip():
+                nl_query = f"Based on the user's question '{user_query}', find relevant customers, products, and their consumption relationships in the graph"
+            else:
+                nl_query = "Find the top customers and products based on consumption relationships"
+            
+            # Use natural language tool to query Neo4j
+            neo4j_results = neo4j_natural_language_query.invoke({
+                "query_text": nl_query,
+                "top_k": 10,
+                "retrieval_method": "cypher",
+                "query_type": "re_hops"
+            })
+            
+            # Process results to match expected format
+            # The natural language tool returns structured data that we can use directly
+            neo4j_data = neo4j_results if neo4j_results else []
+            
+            self._log("COLLECT NEO4J SUCCESS", {
+                "user_id": state.get("user_id"),
+                "rows": len(neo4j_data),
+                "method": "natural_language"
+            })
+        except Exception as e:
+            self._log("COLLECT NEO4J ERROR", {
+                "user_id": state.get("user_id"),
+                "error": str(e)
+            })
+            # Fallback to direct Cypher query if natural language fails
+            try:
+                self._log("COLLECT NEO4J FALLBACK", {
+                    "user_id": state.get("user_id"),
+                    "fallback": "direct_cypher"
+                })
+                # Use Spanish labels: Consumidor (Customer) and Producto (Product)
+                neo4j_query = (
+                    "MATCH (c:Consumidor)-[r:CONSUMIR]->(p:Producto) "
+                    "RETURN COALESCE(c.name, c.nombre, c.tipo, c.region, 'Consumidor') AS topCustomer, "
+                    "COUNT(r) AS purchases "
+                    "ORDER BY purchases DESC LIMIT 2"
+                )
+                neo4j_data = neo4j_query_tool.invoke({
+                    "query": neo4j_query,
+                    "params": {"limit": 2}
+                })
+            except Exception as fallback_error:
+                self._log("COLLECT NEO4J FALLBACK ERROR", {
+                    "user_id": state.get("user_id"),
+                    "error": str(fallback_error)
+                })
+                # Final fallback to empty list
+                neo4j_data = []
+        
         self._log("COLLECT RESULT", {
             "user_id": state.get("user_id"),
-            "supabase_keys": list((supabase_data or {}).keys()) if isinstance(supabase_data, dict) else "n/a",
-            "neo4j_rows": len(neo4j_data or []),
+            "supabase_keys": list(supabase_data.keys()) if isinstance(supabase_data, dict) else [],
+            "neo4j_rows": len(neo4j_data),
         })
+        
         return {
             "retrieved_data": {
                 "supabase": supabase_data,
