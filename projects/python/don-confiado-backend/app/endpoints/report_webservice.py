@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from fastapi_utils.cbv import cbv
 from pathlib import Path
 
-# DTOs
+# DTOs (Data Transfer Object) es un objeto simple usado para transportar datos entre capas o servicios sin lógica de negocio.
 from .dto.message_dto import ChatRequestDTO, ChatResponseDTO
 
 # LLM setup (kept for future non-mock nodes)
@@ -17,19 +17,21 @@ from langchain.chat_models import init_chat_model
 # LangGraph
 from langgraph.graph import StateGraph
 from langgraph.checkpoint.memory import InMemorySaver
+#InMemorySave: Permite guardar y restaurar el estado del grafo (agentes, nodos, mensajes, variables) 
+#Directamente en memoria RAM, sin usar bases de datos.
 
-# Real Tools
+# Real Tools: Herramientas reales que se usan para obtener datos de Supabase y Neo4j.
 from ai.tools.supabase_tools import supabase_query_tool
 from ai.tools.neo4j_tools import neo4j_query_tool
 from ai.tools.neo4j_natural_language_tool import neo4j_natural_language_query
 from ai.tools.neo4j_data_processor import process_natural_language_results, format_neo4j_data_for_llm
 from ai.tools.advanced_analytics_tool import advanced_analytics_tool
 
-# Logs
+# Logs: Funciones para loguear mensajes en la consola.
 from logs.beauty_log import beauty_var_log
 from pydantic import BaseModel, Field, ValidationError
 
-
+# ReportState: Estado del flujo de trabajo.
 class ReportState(TypedDict, total=False):
     user_id: str
     query: str
@@ -45,7 +47,7 @@ class ReportState(TypedDict, total=False):
     next_action: str
     final_report: str
 
-
+# SecurityAssessment: Evaluación de seguridad.
 class SecurityAssessment(BaseModel):
     is_safe: bool = Field(...)
     threat_level: Literal["none", "low", "medium", "high", "critical"] = Field(default="none")
@@ -53,36 +55,38 @@ class SecurityAssessment(BaseModel):
     reasoning: str = Field(default="")
     recommendation: Literal["SAFE", "BLOCK"] = Field(default="SAFE")
 
-
+# DraftAssessment: Evaluación del borrador.
 class DraftAssessment(BaseModel):
     report_draft: str = Field(..., description="A concise business report answering the user's query.")
     key_points: List[str] = Field(default_factory=list, description="Bullet key points included in the report.")
     confidence: Literal["low", "medium", "high"] = Field(default="medium")
 
-
+# AdversarialReviewModel: Agente Revisor adversario.
 class AdversarialReviewModel(BaseModel):
     review_notes: List[str] = Field(..., description="Critiques and weak points identified as an external evaluator.")
     severity: Literal["low", "medium", "high"] = Field(default="low")
 
-
+# FinalAnswer: Respuesta final.
 class FinalAnswer(BaseModel):
     final_report: str = Field(..., description="Improved final response to the user, 2–4 sentences, actionable and clear.")
 
-
+# ReflectionPatch: Mejora del borrador.
 class ReflectionPatch(BaseModel):
     improved_draft: str = Field(..., description="Versión mejorada del borrador.")
     reasoning: str = Field(default="", description="Breve explicación de la mejora aplicada.")
 
-
+# OrchestratorDecision: Decisión del orquestador.
 class OrchestratorDecision(BaseModel):
     next_action: Literal["collect", "draft", "reflect", "review", "finalize"] = Field(...)
     reason: str = Field(default="")
     iteration_count: int = Field(default=0)
 
-
+# report_webservice_api_router: Router de la API de Reporte Web Service.
 report_webservice_api_router = APIRouter()
+#Sirve para agrupar y organizar endpoints relacionados (por ejemplo, rutas del webservice de reportes) 
+#antes de incluirlos en la aplicación principal.
 
-
+#16/11/2025 Integra Clase ReportWebService
 @cbv(report_webservice_api_router)
 class ReportWebService:
     """
@@ -177,6 +181,7 @@ class ReportWebService:
     # -----------
     # Node impls
     # -----------
+    #16/11/2025 Integra Nodo Security Check
     def node_security_check(self, state: ReportState) -> ReportState:
         """
         Real security check using LLM to evaluate input for threats.
@@ -265,6 +270,7 @@ No incluyas texto adicional fuera del JSON."""
                 "security_notes": notes,
             }
 
+    #16/11/2025 Integra Nodo Orchestrator
     def node_orchestrator(self, state: ReportState) -> ReportState:
         """
         Orquestador inteligente: decide el siguiente paso del flujo según el estado.
@@ -363,7 +369,7 @@ Responde SOLO con el siguiente JSON:
             res = {"next_action": "finalize"}
             self._log("ORCHESTRATOR FALLBACK", {"user_id": state.get("user_id"), **res})
             return res
-
+    #16/11/2025 Integra Nodo Collect Data
     def node_collect_data(self, state: ReportState) -> ReportState:
         """
         Collect data from Supabase and Neo4j using real tools.
@@ -405,7 +411,7 @@ Responde SOLO con el siguiente JSON:
             else:
                 nl_query = "Find the top customers and products based on consumption relationships"
             
-            # Use natural language tool to query Neo4j
+            # Use natural language tool to query Neo4j usynd cypher (lenguaje de consulta para Neo4j)
             neo4j_results = neo4j_natural_language_query.invoke({
                 "query_text": nl_query,
                 "top_k": 10,
@@ -525,7 +531,7 @@ Responde SOLO con el siguiente JSON:
                 "sources": ["supabase", "neo4j"] + (["analytics"] if analytics_data else []),
             }
         }
-
+    #16/11/2025 Integra Nodo Draft Report
     def node_draft_report(self, state: ReportState) -> ReportState:
         query = state.get("query") or ""
         data = state.get("retrieved_data") or {}
@@ -754,6 +760,7 @@ Devuelve tu salida en este formato estricto:
             self._log("DRAFT FALLBACK", {"user_id": state.get("user_id"), "report_preview": self._sample(draft_text)})
             return {"report_draft": draft_text}
 
+    #16/11/2025 Integra Nodo Adversarial Review
     def node_adversarial_review(self, state: ReportState) -> ReportState:
         query = state.get("query") or ""
         # Check report_draft first (from draft node), then improved_draft (from reflect node)
@@ -777,7 +784,7 @@ CONTEXTO DE DATOS DISPONIBLES:
         prompt = f"""Actúa como un evaluador externo adversarial (red-team) para un reporte de negocio.
 Tu objetivo es encontrar puntos débiles, supuestos no justificados, huecos de datos y riesgos.
 
-IMPORTANTE: Considera que los datos cualitativos (gráfico de conocimiento, relaciones, entidades) son VALIOSOS y válidos cuando no hay datos cuantitativos disponibles. 
+IMPORTANTE: Considera que los datos cualitativos (gráfico de conocimiento, relaciones, entidades, estructura) son VALIOSOS y válidos cuando no hay datos cuantitativos disponibles. 
 No critiques la falta de datos cuantitativos si el reporte usa adecuadamente datos cualitativos disponibles.
 
 Consulta del usuario:
@@ -863,6 +870,7 @@ Responde SOLO con:
             self._log("REFLECT FALLBACK", {"user_id": state.get("user_id"), "draft_preview": self._sample(draft)})
             return res
 
+    #16/11/2025 Integra Nodo Finalize
     def node_finalize(self, state: ReportState) -> ReportState:
         if state.get("security_flag"):
             return {
@@ -889,7 +897,7 @@ Responde SOLO con:
 1. RESPONDA DIRECTAMENTE la pregunta del usuario usando los datos disponibles
 2. Use los datos cualitativos (gráfico de conocimiento) si están disponibles, incluso sin datos cuantitativos
 3. Integre las críticas relevantes de forma constructiva
-4. Sea clara, accionable y útil
+4. Sea claro, accionable y útil
 
 {data_note}
 
@@ -933,6 +941,7 @@ Devuelve tu salida en el siguiente formato estricto:
     # =========================
     # Endpoint
     # =========================
+    #16/11/2025 Integra Endpoint Generate Report
     @report_webservice_api_router.post("/api/report_v1.0")
     async def generate_report(self, request: ChatRequestDTO):
         """
