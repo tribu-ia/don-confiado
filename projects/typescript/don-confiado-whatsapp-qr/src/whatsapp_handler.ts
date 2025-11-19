@@ -25,7 +25,7 @@ function fileToBase64(path: string): string {
 
 
 class WhatsAppHandler {
-  private  BACKEND_URL:string = `http://127.0.0.1:8000/api/chat_v3.1`;
+  private  BACKEND_URL:string = `http://127.0.0.1:8000/api/report_v1.0`;
   private sock!: WASocket;
   private qrAttempts = 0;
   private readonly maxQrAttempts = 3;
