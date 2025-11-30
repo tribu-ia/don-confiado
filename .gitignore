@@ -16,3 +16,5 @@ env*/
 
 # Temporarily ignore notebooks directory
 
+# Drafts folder
+notebooks/content/drafts/
