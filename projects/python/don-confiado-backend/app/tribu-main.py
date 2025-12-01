@@ -8,6 +8,8 @@ from endpoints.chat_clase_03 import chat_clase_03_api_router
 from endpoints.agent_webservice import agent_webservice_api_router
 from endpoints.chat_clase_04 import graphrag_api_router
 from endpoints.report_webservice import report_webservice_api_router
+from endpoints.eval_demo_endpoint import eval_demo_api_router  # NEW: Academic eval demo
+from endpoints.mock_eval_endpoint import mock_eval_api_router  # NEW: Mock demo (no DB needed)
 import os
 import logging
 from pathlib import Path
@@ -40,6 +42,8 @@ if __name__ == "__main__":
     app.include_router(hello_webservice_api_router)
     app.include_router(agent_webservice_api_router)
     app.include_router(report_webservice_api_router)
+    app.include_router(eval_demo_api_router)  # NEW: Academic RAG evaluation demo
+    app.include_router(mock_eval_api_router)  # NEW: Mock demo (no database required)
     
     logger.info("Server starting on http://127.0.0.1:8000")
     uvicorn.run(app, host="127.0.0.1", port=8000, log_config=None)

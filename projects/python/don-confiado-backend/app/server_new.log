@@ -1,0 +1,8 @@
+2025-11-30 18:45:47,338 - __main__ - INFO - Starting server...
+2025-11-30 18:45:47,338 - __main__ - INFO - Log file: /Volumes/Life-OS/Users/Arkatechie/Development/tribu/don-confiado/projects/python/don-confiado-backend/app/server.log
+2025-11-30 18:45:47,340 - __main__ - INFO - Server starting on http://127.0.0.1:8000
+2025-11-30 18:45:47,376 - uvicorn.error - INFO - Started server process [30564]
+2025-11-30 18:45:47,376 - uvicorn.error - INFO - Waiting for application startup.
+2025-11-30 18:45:47,376 - uvicorn.error - INFO - Application startup complete.
+2025-11-30 18:45:47,377 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+2025-11-30 18:45:47,714 - uvicorn.access - INFO - 127.0.0.1:65047 - "GET /api/eval/scenarios HTTP/1.1" 200
