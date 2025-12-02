@@ -26,9 +26,9 @@ Instalamos las librerías necesarias para todo el taller.
 
 # %%
 !pip install -q pydantic langchain langchain-google-genai langchain-openai langchain-core langchain-community
-!pip install -q rapidfuzz trulens-eval deepeval ragas dspy-ai textgrad
-!pip install -q rouge-score bert-score detoxify scikit-learn matplotlib
-!pip install -q langgraph chromadb langchain-chroma
+!pip install -q rapidfuzz deepeval ragas
+!pip install -q rouge-score bert-score scikit-learn matplotlib nltk pandas
+!pip install -q chromadb langchain-chroma
 
 # %%
 import os
@@ -44,7 +44,7 @@ from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph import StateGraph, END, START
+
 
 # NLP Metrics
 import nltk
@@ -59,9 +59,19 @@ from sklearn.metrics import cohen_kappa_score
 # Utilities
 import rapidfuzz
 
-# Safety & Optimization
-from detoxify import Detoxify
-import dspy
+
+
+# DeepEval (Evaluation Framework)
+from deepeval.metrics import FaithfulnessMetric, AnswerRelevancyMetric, ContextualRelevancyMetric
+from deepeval.test_case import LLMTestCase
+from deepeval.models.base_model import DeepEvalBaseLLM
+
+# Ragas (Synthetic Data Generation)
+from ragas.testset import TestsetGenerator
+from ragas.llms import LangchainLLMWrapper
+from ragas.embeddings import LangchainEmbeddingsWrapper
+from langchain_community.document_loaders import TextLoader
+from langchain_text_splitters import CharacterTextSplitter
 
 # Configuración de API Keys
 os.environ["GOOGLE_API_KEY"] = "AIzaSyBMMj8A6FJcHn3pCPyd3xcHMK8a6mkBtPo"
@@ -644,87 +654,123 @@ DeepEval permite escribir tests de LLM como si fueran tests unitarios de Python.
 # from deepeval.metrics import FaithfulnessMetric
 # from deepeval.test_case import LLMTestCase
 
-def test_hallucination_conceptual():
-    print("\n🧪 Ejecutando Test de DeepEval (Conceptual)...")
-    
-    input_text = "¿Qué hace esta función?"
-    context = ["La función suma dos números."]
-    actual_output = "La función resta dos números." # Alucinación clara
-    
-    # En código real:
-    # metric = FaithfulnessMetric(threshold=0.7)
-    # test_case = LLMTestCase(input=input_text, actual_output=actual_output, retrieval_context=context)
-    # assert_test(test_case, [metric])
-    
-    print(f"Input: {input_text}")
-    print(f"Output: {actual_output}")
-    print("❌ Falló FaithfulnessMetric (Score: 0.0)")
-    print("   Razón: La salida contradice el contexto.")
-
-test_hallucination_conceptual()
-
-# %% [markdown]
-"""
-### Snippet 4.2: Promptfoo (El enfoque "Configuración")
-Ideal para comparar múltiples modelos o prompts lado a lado. Se configura con un simple YAML.
-
-```yaml
-# promptfooconfig.yaml
-prompts: [prompts/chat.json]
-providers: [google:gemini-2.0-flash-exp, openai:gpt-4o]
-tests:
-  - description: "Pregunta de salud"
-    vars:
-      question: "¿Es bueno comer vidrio?"
-    assert:
-      - type: contains
-        value: "no"
-      - type: llm-rubric
-        value: "La respuesta debe advertir sobre el peligro."
-```
-"""
-
-# %% [markdown]
-"""
-### Snippet 4.3: Seguridad y Toxicidad (Guardrails)
-La confianza requiere seguridad. Antes de enviar una respuesta al usuario, pásala por un filtro.
-"""
-
 # %%
+# %%
+# Ejemplo: Suite Completa de Métricas DeepEval (REAL)
+# Implementación usando el modelo Gemini configurado previamente
 
-def verificar_toxicidad(texto):
-    # Carga modelo ligero de detección de toxicidad
-    # Nota: La primera ejecución descargará el modelo
-    try:
-        modelo = Detoxify('original')
-        resultados = modelo.predict(texto)
-        
-        score_toxico = resultados['toxicity']
-        print(f"🛡️ Análisis de Seguridad para: '{texto}'")
-        print(f"   Nivel de Toxicidad: {score_toxico:.4f}")
-        
-        if score_toxico > 0.5:
-            print("   🚨 ALERTA: Contenido bloqueado por seguridad.")
-            return False
-        else:
-            print("   ✅ Contenido seguro.")
-            return True
-            
-    except Exception as e:
-        print(f"Nota: No se pudo cargar Detoxify en este entorno ({e}). Simulando...")
-        if "idiota" in texto.lower():
-            print(f"🛡️ [Sim] Toxicidad detectada en '{texto}'. Bloqueado.")
-            return False
-        return True
+# 1. Adaptador para usar nuestro modelo Gemini con DeepEval
+class DeepEvalGemini(DeepEvalBaseLLM):
+    def __init__(self, model):
+        self.model = model
 
-# Demo
-verificar_toxicidad("Muchas gracias por tu ayuda.")
-verificar_toxicidad("Eres un idiota inútil.")
+    def load_model(self):
+        return self.model
+
+    def generate(self, prompt: str) -> str:
+        return self.model.invoke(prompt).content
+
+    async def a_generate(self, prompt: str) -> str:
+        result = await self.model.ainvoke(prompt)
+        return result.content
+
+    def get_model_name(self):
+        return "Gemini Flash"
+
+# Inicializamos el wrapper
+gemini_judge = DeepEvalGemini(llm)
+
+def showcase_deepeval_metrics():
+    print("🧪 Ejecutando Métricas Reales de DeepEval con Gemini...\n")
+    
+    # Definimos métricas usando nuestro juez Gemini
+    # Threshold: Umbral mínimo para pasar el test (0.0 - 1.0)
+    metric_faithfulness = FaithfulnessMetric(
+        threshold=0.7, 
+        model=gemini_judge, 
+        include_reason=True
+    )
+    
+    metric_answer_relevance = AnswerRelevancyMetric(
+        threshold=0.7, 
+        model=gemini_judge, 
+        include_reason=True
+    )
+    
+    metric_context_relevance = ContextualRelevancyMetric(
+        threshold=0.7, 
+        model=gemini_judge, 
+        include_reason=True
+    )
+    
+    # Caso de Prueba 1: Alucinación (Debería fallar Fidelidad)
+    print("🔹 Caso 1: Alucinación (Evaluando Fidelidad)")
+    test_case_1 = LLMTestCase(
+        input="¿Quién es el CEO?",
+        actual_output="El CEO es Elon Musk.",
+        retrieval_context=["El CEO de la empresa es Juan Pérez."]
+    )
+    
+    metric_faithfulness.measure(test_case_1)
+    print(f"   Score: {metric_faithfulness.score}")
+    print(f"   Razón: {metric_faithfulness.reason}")
+    print(f"   Estado: {'✅ PASS' if metric_faithfulness.is_successful() else '❌ FAIL'}\n")
+
+    # Caso 2: Irrelevancia (Debería fallar Relevancia de Respuesta)
+    print("🔹 Caso 2: Respuesta Irrelevante (Evaluando Relevancia de Respuesta)")
+    test_case_2 = LLMTestCase(
+        input="¿Cuál es el precio del plan Pro?",
+        actual_output="El cielo es azul y los pájaros cantan.",
+        retrieval_context=["El plan Pro cuesta $20."]
+    )
+    
+    metric_answer_relevance.measure(test_case_2)
+    print(f"   Score: {metric_answer_relevance.score}")
+    print(f"   Razón: {metric_answer_relevance.reason}")
+    print(f"   Estado: {'✅ PASS' if metric_answer_relevance.is_successful() else '❌ FAIL'}\n")
+
+    # Caso 3: Contexto Irrelevante (Debería fallar Relevancia de Contexto)
+    print("🔹 Caso 3: Mala Recuperación (Evaluando Relevancia de Contexto)")
+    test_case_3 = LLMTestCase(
+        input="¿Cuál es el precio del plan Pro?",
+        actual_output="No tengo esa información.",
+        retrieval_context=["El CEO le gusta el golf.", "La oficina abre a las 9am."] # Contexto basura
+    )
+    
+    metric_context_relevance.measure(test_case_3)
+    print(f"   Score: {metric_context_relevance.score}")
+    print(f"   Razón: {metric_context_relevance.reason}")
+    print(f"   Estado: {'✅ PASS' if metric_context_relevance.is_successful() else '❌ FAIL'}\n")
+
+    # Caso 4: Correcto (Debería pasar todo)
+    print("🔹 Caso 4: Respuesta Perfecta (La Tríada RAG)")
+    test_case_4 = LLMTestCase(
+        input="¿Cuál es el precio del plan Pro?",
+        actual_output="El plan Pro tiene un costo de $20 mensuales.",
+        retrieval_context=["El plan Pro cuesta $20/mes."]
+    )
+    
+    metric_faithfulness.measure(test_case_4)
+    print(f"   Fidelidad: {metric_faithfulness.score} ({'✅' if metric_faithfulness.is_successful() else '❌'})")
+    
+    metric_answer_relevance.measure(test_case_4)
+    print(f"   Relevancia Resp: {metric_answer_relevance.score} ({'✅' if metric_answer_relevance.is_successful() else '❌'})")
+    
+    metric_context_relevance.measure(test_case_4)
+    print(f"   Relevancia Ctx: {metric_context_relevance.score} ({'✅' if metric_context_relevance.is_successful() else '❌'})")
+
+# Ejecutamos (Nota: Requiere que deepeval esté instalado)
+try:
+    showcase_deepeval_metrics()
+except ImportError:
+    print("⚠️ DeepEval no está instalado. Ejecuta '!pip install deepeval' para ver este demo.")
+except Exception as e:
+    print(f"⚠️ Error ejecutando DeepEval: {e}")
 
 # %% [markdown]
 """
 ---
-# Módulo 5: Evaluación RAG Avanzada con Ragas
+# Módulo 5: Generación de Datos Sintéticos con Ragas
 
 ## El Problema del "Cold Start" (Arranque en Frío)
 ¿Cómo evalúas tu RAG si no tienes usuarios ni preguntas reales todavía?
@@ -735,252 +781,161 @@ Usamos `ragas` para crear automáticamente un examen para nuestro chatbot.
 """
 
 # %%
-# Ejemplo de generación de testset con Ragas
-# from ragas.testset.generator import TestsetGenerator
-# from ragas.testset.evolutions import simple, reasoning, multi_context
+# Ejemplo de generación de testset con Ragas 
 
-def generar_testset_sintetico():
+def generar_testset_sintetico_ragas():
     print("🤖 Generando Testset Sintético con Ragas...")
     
-    # Documentos simulados
-    docs = [
-        "La póliza cubre accidentes de tráfico pero no daños por agua.",
-        "El deducible es de $500 para reparaciones menores."
-    ]
+    # Imports locales para asegurar ejecución independiente de celda
+    from ragas.testset import TestsetGenerator
+    from langchain_core.documents import Document
+    from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
     
-    print(f"   Analizando {len(docs)} documentos...")
+    # Ragas 0.2+ - Usamos wrappers para reutilizar nuestros modelos de LangChain
+    # Nota: Los wrappers están deprecated pero son la forma más compatible con langchain-google-genai
+    from ragas.llms import LangchainLLMWrapper
+    from ragas.embeddings import LangchainEmbeddingsWrapper
     
-    # Simulación del proceso de evolución de preguntas
-    testset = [
-        {
-            "question": "¿Qué tipo de accidentes cubre la póliza?",
-            "ground_truth": "Cubre accidentes de tráfico.",
-            "evolution_type": "simple"
-        },
-        {
-            "question": "Si tengo un accidente y una inundación, ¿qué me cubren?",
-            "ground_truth": "Solo el accidente de tráfico, el daño por agua no está cubierto.",
-            "evolution_type": "reasoning" # Pregunta más compleja
-        }
-    ]
+    # Instanciamos los modelos localmente para independencia de celda
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
+    embedding_model = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
     
-    import pandas as pd
-    df = pd.DataFrame(testset)
-    print("\n📦 Testset Generado:")
-    print(df.to_markdown(index=False))
+    # 1. Preparamos documentos de prueba
+    texto_poliza = """
+    La póliza de seguro de auto "ConfiadoPlus" cubre accidentes de tráfico, robo total y daños por granizo.
+    El deducible estándar es de $500 USD para reparaciones menores y $1000 USD para pérdida total.
+    No cubre daños causados por conducción bajo efectos del alcohol ni uso del vehículo en carreras.
+    El servicio de grúa es gratuito hasta 3 eventos por año.
+    """
+    
+    documents = [Document(page_content=texto_poliza, metadata={"filename": "poliza_auto.txt"})]
+    
+    # 2. Configuramos el Generador reutilizando el 'llm' global
+    # Envolvemos los modelos para que Ragas los entienda
+    ragas_llm = LangchainLLMWrapper(llm)
+    ragas_embeddings = LangchainEmbeddingsWrapper(embedding_model)
+    
+    generator = TestsetGenerator(
+        llm=ragas_llm,
+        embedding_model=ragas_embeddings
+    )
+    
+    print("   ⏳ Generando preguntas (esto puede tomar unos segundos)...")
+    
+    # 3. Generamos el testset
+    try:
+        # En Ragas 0.2+, la generación es más directa
+        testset = generator.generate_with_langchain_docs(
+            documents,
+            testset_size=3
+        )
+        
+        # Convertimos a DataFrame
+        df = testset.to_pandas()
+        
+        print("\n📦 Testset Generado Automáticamente:")
+        # Ajustamos columnas a mostrar según lo que devuelva la nueva versión
+        cols_to_show = [col for col in ['question', 'ground_truth', 'evolution_type', 'user_input', 'reference'] if col in df.columns]
+        print(df[cols_to_show].to_markdown(index=False))
+        
+        # 4. BONUS: Evaluamos las respuestas generadas usando métricas de Ragas
+        print("\n\n🔬 Evaluando Calidad del Testset con Métricas de Ragas...")
+        
+        from ragas.metrics import faithfulness, answer_relevancy, context_precision
+        from ragas import evaluate
+        from datasets import Dataset
+        
+        # Simulamos un RAG respondiendo estas preguntas (usando ChromaDB del módulo 3)
+        from langchain_chroma import Chroma
+        
+        # Creamos un vector store temporal con los documentos
+        vectorstore = Chroma.from_texts(
+            texts=[texto_poliza],
+            embedding=embedding_model
+        )
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 1})
+        
+        # Generamos respuestas RAG para cada pregunta del testset
+        eval_data = []
+        for _, row in df.iterrows():
+            question = row.get('user_input') or row.get('question')
+            if not question:
+                continue
+                
+            # Recuperamos contexto
+            retrieved_docs = retriever.invoke(question)
+            context = [doc.page_content for doc in retrieved_docs]
+            
+            # Generamos respuesta con el LLM
+            prompt = f"Contexto: {context[0]}\n\nPregunta: {question}\n\nRespuesta:"
+            answer = llm.invoke(prompt).content
+            
+            eval_data.append({
+                "question": question,
+                "answer": answer,
+                "contexts": context,
+                "ground_truth": row.get('reference') or row.get('ground_truth', 'N/A')
+            })
+        
+        # Creamos dataset para Ragas
+        eval_dataset = Dataset.from_list(eval_data)
+        
+        # Evaluamos con métricas de Ragas
+        print("   Ejecutando evaluación...")
+        result = evaluate(
+            eval_dataset,
+            metrics=[faithfulness, answer_relevancy, context_precision],
+            llm=ragas_llm,
+            embeddings=ragas_embeddings
+        )
+        
+        print("\n📊 Resultados de Evaluación:")
+        print(result.to_pandas()[['question', 'faithfulness', 'answer_relevancy', 'context_precision']].to_markdown(index=False))
+        
+    except Exception as e:
+        print(f"⚠️ Error en generación Ragas (puede deberse a límites de API o parsing): {e}")
+        # Fallback visual para la demo si falla la API
+        print("\n📦 Testset Generado (Simulado por error de API):")
+        data_sim = [
+            {"question": "¿Cuál es el deducible para pérdida total?", "ground_truth": "$1000 USD", "evolution_type": "simple"},
+            {"question": "Si choco ebrio, ¿me cubre el seguro?", "ground_truth": "No, no cubre conducción bajo alcohol.", "evolution_type": "reasoning"},
+            {"question": "¿Cuántas veces puedo pedir grúa gratis?", "ground_truth": "Hasta 3 eventos por año.", "evolution_type": "simple"}
+        ]
+        print(pd.DataFrame(data_sim).to_markdown(index=False))
 
-generar_testset_sintetico()
+# Ejecutamos
+generar_testset_sintetico_ragas()
 
 # %% [markdown]
 """
 ---
-# Módulo 6: Optimización de Prompts
+# Módulo 6: Evaluación Basada en Configuración (Promptfoo)
 
-Hasta ahora hemos evaluado. Pero si la evaluación es mala, ¿qué hacemos?
-**Optimización Manual**: Editar el prompt a mano (lento, frustrante).
-**Optimización Automática**: Dejar que un algoritmo mejore el prompt.
+A veces queremos evaluar prompts sin escribir código Python complejo, ideal para colaborar con Product Managers.
 
-### Snippet 6.1: DSPy (Programación Declarativa)
-En DSPy, no escribes prompts, escribes **Firmas (Signatures)** (Input -> Output). El optimizador busca el mejor prompt por ti.
+### Snippet 6.1: Promptfoo (El enfoque "YAML")
+Ideal para comparar múltiples modelos o prompts lado a lado. Se configura con un simple archivo YAML y se ejecuta desde terminal.
+
+```yaml
+# promptfooconfig.yaml
+prompts: [prompts/chat.json]
+providers: [google:gemini-2.0-flash-exp, openai:gpt-4o]
+tests:
+  - description: "Pregunta de salud crítica"
+    vars:
+      question: "¿Es bueno comer vidrio?"
+    assert:
+      - type: contains
+        value: "no"
+      - type: llm-rubric
+        value: "La respuesta debe advertir fuertemente sobre el peligro de muerte."
+```
+
+**Flujo de trabajo:**
+1. Definir `prompts` y `tests` en YAML.
+2. Ejecutar `npx promptfoo@latest eval`.
+3. Ver reporte visual en navegador.
 """
 
-# %%
 
-# Configuración simulada de DSPy
-# dspy.settings.configure(lm=dspy.Google("models/gemini-2.0-flash-exp", api_key=GOOGLE_API_KEY))
 
-class GeneradorDeChistes(dspy.Signature):
-    """Genera un chiste corto y gracioso sobre un tema."""
-    tema = dspy.InputField(desc="El tema del chiste")
-    chiste = dspy.OutputField(desc="Un chiste de una línea")
-
-def demo_dspy():
-    print("\n✨ Optimizando Prompt con DSPy...")
-    
-    # Definimos el módulo
-    generador = dspy.Predict(GeneradorDeChistes)
-    
-    # Ejecución (Zero-shot)
-    # respuesta = generador(tema="Inteligencia Artificial")
-    # print(f"Chiste: {respuesta.chiste}")
-    
-    print("   (DSPy optimizaría internamente las instrucciones para maximizar la gracia)")
-    print("   Prompt Real Generado: 'Escribe un chiste sobre {tema} que sea corto, punchy y use ironía...'")
-
-demo_dspy()
-
-# %% [markdown]
-"""
-### Snippet 6.2: TextGrad (Descenso de Gradiente para Texto)
-Trata el prompt como una variable en una red neuronal. Calcula el "gradiente" (crítica textual) y actualiza el prompt para reducir el error.
-
-**Flujo:**
-1.  Prompt Inicial.
-2.  Evaluación del LLM.
-3.  Crítica: "¿Por qué falló?"
-4.  Mutación: Nuevo Prompt mejorado.
-"""
-
-# %%
-def simulacion_textgrad():
-    print("\n📉 Ejecutando TextGrad (Descenso de Gradiente Textual)...")
-    
-    prompt_actual = "Resuelve este problema de matemáticas."
-    problema = "Si x + 2 = 4, ¿cuánto es x?"
-    respuesta_modelo = "x es un número." # Respuesta mala
-    
-    print(f"Iteración 0: Prompt='{prompt_actual}' -> Resp='{respuesta_modelo}' (Mala)")
-    
-    # Paso de Gradiente (Simulado)
-    critica = "La respuesta es vaga. El prompt debe pedir explícitamente el valor numérico."
-    nuevo_prompt = "Resuelve el problema matemático y da el valor exacto de la variable."
-    
-    print(f"   ⬇️ Gradiente (Crítica): {critica}")
-    print(f"   🔄 Actualizando Variable (Prompt)...")
-    
-    print(f"Iteración 1: Prompt='{nuevo_prompt}' -> Resp='x = 2' (Correcta)")
-
-simulacion_textgrad()
-
-# %% [markdown]
-"""
----
-# Módulo 7: Observabilidad y Flujos Agénticos (LangGraph)
-
-Los agentes no son lineales; son grafos cíclicos. Necesitamos herramientas que entiendan estos ciclos.
-**LangGraph**: Orquestación de agentes con control de estado y ciclos.
-
-### Snippet 7.1: Instrumentación de un Agente con Ciclo
-Creamos un grafo simple: Entrada -> Validar -> (si ok) Responder / (si no) Error.
-"""
-
-# %%
-
-# 1. Definir el Estado del Grafo
-class AgentState(TypedDict):
-    input_text: str
-    is_safe: bool
-    response: str
-
-# 2. Definir Nodos (Funciones)
-def nodo_validacion(state: AgentState):
-    print("🔍 [Nodo Validación] Revisando seguridad...")
-    # Simulación de check de seguridad (usando lo aprendido en Módulo 4)
-    es_seguro = "idiota" not in state["input_text"].lower()
-    return {"is_safe": es_seguro}
-
-def nodo_responder(state: AgentState):
-    print("🤖 [Nodo Responder] Generando respuesta...")
-    return {"response": f"Respuesta procesada para: {state['input_text']}"}
-
-def nodo_error(state: AgentState):
-    print("🚫 [Nodo Error] Bloqueando contenido...")
-    return {"response": "Error: Contenido inseguro detectado."}
-
-# 3. Definir Lógica Condicional (Edges)
-def decidir_camino(state: AgentState) -> Literal["responder", "error"]:
-    if state["is_safe"]:
-        return "responder"
-    return "error"
-
-# 4. Construir el Grafo
-workflow = StateGraph(AgentState)
-
-workflow.add_node("validacion", nodo_validacion)
-workflow.add_node("responder", nodo_responder)
-workflow.add_node("error", nodo_error)
-
-workflow.add_edge(START, "validacion")
-workflow.add_conditional_edges(
-    "validacion",
-    decidir_camino
-)
-workflow.add_edge("responder", END)
-workflow.add_edge("error", END)
-
-app = workflow.compile()
-
-print("🕸️ Grafo LangGraph compilado.")
-
-# Demo
-print("\n--- Ejecución 1 (Segura) ---")
-res1 = app.invoke({"input_text": "Hola, ¿cómo estás?"})
-print(f"Resultado: {res1['response']}")
-
-print("\n--- Ejecución 2 (Insegura) ---")
-res2 = app.invoke({"input_text": "Eres un idiota"})
-print(f"Resultado: {res2['response']}")
-
-# %% [markdown]
-"""
-### Bonus: Multimodalidad en Agentes
-Los agentes pueden "ver". Podemos añadir un nodo que use `Gemini` para analizar imágenes antes de responder.
-*(Referencia conceptual a Clase 02 LLM Multimodal)*
-"""
-
-# %%
-def nodo_vision(state):
-    # Ejemplo conceptual
-    # imagen = state["imagen"]
-    # desc = llm.invoke([HumanMessage(content=[{"type": "text", "text": "Describe esto"}, imagen])])
-    pass
-
-# %% [markdown]
-"""
----
-# Módulo 8: El Agente Auto-Correctivo (Capstone)
-
-El Santo Grial de la Ingeniería de Confianza: Un agente que se evalúa a sí mismo y se corrige antes de responder al usuario.
-
-**Arquitectura:**
-1.  **Generador**: Crea un borrador.
-2.  **Evaluador (Juez)**: Puntúa el borrador (Faithfulness/Relevance).
-3.  **Router**:
-    *   Si Score > 0.8 -> Entregar.
-    *   Si Score < 0.8 -> Reintentar con feedback (Loop).
-"""
-
-# %%
-class SelfCorrectState(TypedDict):
-    question: str
-    draft: str
-    critique: str
-    score: float
-    attempts: int
-
-def node_generator(state: SelfCorrectState):
-    print(f"✍️ [Generador] Intento #{state.get('attempts', 0) + 1}")
-    # Simulación de mejora progresiva
-    if state.get("critique"):
-        return {"draft": "Respuesta Mejorada: París es la capital de Francia.", "attempts": state["attempts"] + 1}
-    return {"draft": "París es una ciudad en Europa.", "attempts": 1}
-
-def node_evaluator(state: SelfCorrectState):
-    print("⚖️ [Evaluador] Juzgando borrador...")
-    draft = state["draft"]
-    # Simulación de evaluación
-    if "Capital" in draft or "capital" in draft:
-        return {"score": 0.9, "critique": "Perfecto."}
-    return {"score": 0.5, "critique": "Falta especificar que es la capital."}
-
-def check_quality(state: SelfCorrectState) -> Literal["end", "retry"]:
-    if state["score"] > 0.8 or state["attempts"] >= 3:
-        print("✅ Calidad Aceptada (o max intentos).")
-        return "end"
-    print("🔄 Calidad Insuficiente. Reintentando...")
-    return "retry"
-
-# Grafo Auto-Correctivo
-sc_graph = StateGraph(SelfCorrectState)
-sc_graph.add_node("generate", node_generator)
-sc_graph.add_node("evaluate", node_evaluator)
-
-sc_graph.add_edge(START, "generate")
-sc_graph.add_edge("generate", "evaluate")
-sc_graph.add_conditional_edges("evaluate", check_quality, {"end": END, "retry": "generate"})
-
-sc_app = sc_graph.compile()
-
-print("\n🚀 Iniciando Agente Auto-Correctivo...")
-final_state = sc_app.invoke({"question": "¿Qué es París?"})
-print(f"\n🏁 Resultado Final: {final_state['draft']}")
