@@ -28,31 +28,47 @@ Instalamos las librerías necesarias para todo el taller.
 !pip install -q pydantic langchain langchain-google-genai langchain-openai langchain-core langchain-community
 !pip install -q rapidfuzz trulens-eval deepeval ragas dspy-ai textgrad
 !pip install -q rouge-score bert-score detoxify scikit-learn matplotlib
-!pip install -q langgraph
+!pip install -q langgraph chromadb langchain-chroma
 
 # %%
 import os
 import numpy as np
-from typing import List, Optional, Dict, Any
+import pandas as pd
+from numpy.linalg import norm
+from typing import List, Optional, Dict, Any, TypedDict, Literal
+
+# Pydantic
 from pydantic import BaseModel, Field
-from langchain_google_genai import ChatGoogleGenerativeAI
+
+# LangChain & LangGraph
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_chroma import Chroma
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import StateGraph, END, START
+
+# NLP Metrics
+import nltk
+from nltk.translate.bleu_score import sentence_bleu
+from rouge_score import rouge_scorer
+from bert_score import score as bert_score
+
+# Statistical Analysis
+from scipy.stats import pearsonr
+from sklearn.metrics import cohen_kappa_score
+
+# Utilities
 import rapidfuzz
-from dotenv import load_dotenv
+
+# Safety & Optimization
+from detoxify import Detoxify
+import dspy
 
 # Configuración de API Keys
-# Cargar variables de entorno desde .env
-load_dotenv()
-
-# Verificar que las keys estén disponibles
-if not os.getenv("GOOGLE_API_KEY"):
-    raise ValueError("GOOGLE_API_KEY no encontrada. Asegúrate de tener un archivo .env")
-if not os.getenv("OPENAI_API_KEY"):
-    raise ValueError("OPENAI_API_KEY no encontrada. Asegúrate de tener un archivo .env")
+os.environ["GOOGLE_API_KEY"] = "AIzaSyBMMj8A6FJcHn3pCPyd3xcHMK8a6mkBtPo"
 
 # Modelo Principal (Gemini Flash por velocidad y costo)
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash-exp",
+    model="gemini-2.5-flash",
     temperature=0.1
 )
 
@@ -129,8 +145,6 @@ BLEU (Bilingual Evaluation Understudy) mide la coincidencia de n-gramas entre la
 """
 
 # %%
-from nltk.translate.bleu_score import sentence_bleu
-import nltk
 nltk.download('punkt', quiet=True)
 
 # Generamos respuestas reales del LLM para comparar
@@ -161,7 +175,6 @@ ROUGE (Recall-Oriented Understudy for Gisting Evaluation) es el estándar para r
 """
 
 # %%
-from rouge_score import rouge_scorer
 
 scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
 
@@ -200,100 +213,135 @@ BERTScore usa embeddings contextuales para capturar similitud semántica, supera
 """
 
 # %%
-from bert_score import score as bert_score
 
 # Usamos las mismas respuestas del ejemplo BLEU
 referencias = [respuesta_referencia]
 candidatas = [respuesta_candidata]
 
-print("Calculando BERTScore (esto puede tomar unos segundos)...")
-P, R, F1 = bert_score(candidatas, referencias, lang="es", verbose=False)
+# NOTA: BERTScore descarga ~700MB la primera vez y puede tardar varios minutos
+# Para demostraciones, usamos valores simulados
+USE_REAL_BERTSCORE = False  # Cambiar a True si quieres ejecutar el cálculo real
+
+if USE_REAL_BERTSCORE:
+    try:
+        print("Calculando BERTScore (esto puede tomar varios minutos en la primera ejecución)...")
+        P, R, F1 = bert_score(candidatas, referencias, lang="es", verbose=False)
+        bertscore_f1 = F1.mean()
+        print("✅ BERTScore calculado exitosamente")
+    except Exception as e:
+        print(f"⚠️ Error al calcular BERTScore: {e}")
+        print("Usando valor simulado...")
+        bertscore_f1 = 0.85  # Valor típico para respuestas semánticamente similares
+else:
+    # Valor simulado basado en experiencia típica con BERTScore
+    bertscore_f1 = 0.85
+    print("📊 Usando BERTScore simulado (para evitar descarga de 700MB)")
 
 print(f"\n📊 BERTScore:")
-print(f"  Precision: {P.mean():.3f}")
-print(f"  Recall:    {R.mean():.3f}")
-print(f"  F1:        {F1.mean():.3f}")
-print(f"\n✅ BERTScore ({F1.mean():.3f}) vs BLEU ({bleu_score:.3f})")
+print(f"  F1: {bertscore_f1:.3f}")
+print(f"\n✅ BERTScore ({bertscore_f1:.3f}) vs BLEU ({bleu_score:.3f})")
 print("   BERTScore captura mejor la equivalencia semántica!")
+print("\n💡 Nota: Este es un valor simulado. Para calcular el score real,")
+print("   descomenta el código de BERTScore (requiere descarga única de 700MB).")
 
 # %% [markdown]
 """
-### Snippet 1.5: Validación Estadística - Correlación de Pearson
+### Snippet 1.5: Embeddings y Similitud de Coseno - El Espacio Semántico
 
-¿Cómo sabemos si nuestras métricas automáticas son confiables?
-**Respuesta**: Correlacionándolas con evaluaciones humanas.
+**Embeddings** son representaciones vectoriales densas de texto en un espacio multidimensional.
+A diferencia de las métricas anteriores, los embeddings convierten todo el texto en un solo vector
+que captura su significado global.
 
-Generamos múltiples respuestas, las evaluamos con humanos (simulado) y métricas automáticas,
-y calculamos la correlación de Pearson.
+#### 📊 Comparación de Enfoques:
+
+| Métrica | Nivel | Qué Mide | Limitación Principal |
+|---------|-------|----------|---------------------|
+| **BLEU/ROUGE** | Token (palabra) | Coincidencia exacta de n-gramas | No entiende sinónimos ni paráfrasis |
+| **BERTScore** | Token contextual | Similitud entre tokens usando embeddings | Más costoso, pero aún compara palabra por palabra |
+| **Embeddings + Cosine** | Documento completo | Distancia semántica en espacio vectorial | Pierde granularidad de qué partes difieren |
+
+**Similitud de Coseno**: Mide el ángulo entre dos vectores. Valores cercanos a 1 = muy similares, cercanos a 0 = diferentes.
 """
 
 # %%
-from scipy.stats import pearsonr
-from sklearn.metrics import cohen_kappa_score
 
-# Generamos 10 respuestas del LLM para la misma pregunta
-print("🤖 Generando 10 respuestas para evaluar...\n")
+# Inicializamos el modelo de embeddings de Google
+embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
-pregunta_eval = "¿Cuáles son los beneficios del ejercicio regular?"
-respuestas_evaluacion = []
+print("🧠 Generando embeddings para las respuestas del LLM...\n")
 
-for i in range(10):
-    resp = llm.invoke(pregunta_eval).content
-    respuestas_evaluacion.append(resp)
-    print(f"{i+1}. {resp[:80]}...")
+# Usamos las mismas respuestas del ejemplo anterior
+texto1 = respuesta_referencia
+texto2 = respuesta_candidata
 
-# Simulamos puntuaciones humanas (1-5) basadas en calidad percibida
-# En la realidad, estos serían juicios de evaluadores humanos reales
-puntuaciones_humanas = [5, 4, 4, 5, 3, 4, 5, 4, 3, 4]
+# Generamos los embeddings (vectores de 768 dimensiones)
+emb1 = embedding_model.embed_query(texto1)
+emb2 = embedding_model.embed_query(texto2)
 
-# Calculamos métricas automáticas (BERTScore contra una referencia ideal)
-referencia_ideal = "El ejercicio regular mejora la salud cardiovascular, fortalece los músculos y mejora el bienestar mental."
-puntuaciones_automaticas = []
+print(f"📌 Texto 1: {texto1[:80]}...")
+print(f"   Dimensiones del embedding: {len(emb1)}")
+print(f"   Primeros 5 valores: {emb1[:5]}\n")
 
-for resp in respuestas_evaluacion:
-    P, R, F1 = bert_score([resp], [referencia_ideal], lang="es", verbose=False)
-    # Convertimos F1 (0-1) a escala 1-5
-    score_escala = int(F1.mean() * 4) + 1
-    puntuaciones_automaticas.append(score_escala)
+print(f"📌 Texto 2: {texto2[:80]}...")
+print(f"   Dimensiones del embedding: {len(emb2)}")
+print(f"   Primeros 5 valores: {emb2[:5]}\n")
 
+# Calculamos similitud de coseno
+def cosine_similarity(vec1, vec2):
+    """Calcula similitud de coseno entre dos vectores"""
+    return np.dot(vec1, vec2) / (norm(vec1) * norm(vec2))
+
+similitud_coseno = cosine_similarity(emb1, emb2)
+
+print("="*60)
+print("📊 Comparación de Métricas (mismas respuestas):")
+print("="*60)
+print(f"BLEU Score:           {bleu_score:.3f}")
+print(f"BERTScore (F1):       {bertscore_f1:.3f}")
+print(f"Cosine Similarity:    {similitud_coseno:.3f}")
+
+print("\n💡 Observaciones:")
+print(f"   • Los embeddings capturan similitud semántica GLOBAL del texto")
+print(f"   • Coseno = {similitud_coseno:.3f} indica que las respuestas tienen")
+print(f"     {'ALTA' if similitud_coseno > 0.8 else 'MODERADA'} similitud semántica")
+
+# Demo adicional: Textos semánticamente similares pero léxicamente diferentes
 print("\n" + "="*60)
-print("📊 Análisis de Confiabilidad:")
+print("🧪 Experimento: Paráfrasis vs Texto Original")
 print("="*60)
 
-# Calculamos correlación de Pearson
-correlation, p_value = pearsonr(puntuaciones_humanas, puntuaciones_automaticas)
+original = "Los perros son animales leales y cariñosos."
+parafrasis = "Los canes son criaturas fieles y afectuosas."
+diferente = "El cielo está azul hoy."
 
-# Calculamos Cohen's Kappa (acuerdo categórico)
-kappa = cohen_kappa_score(puntuaciones_humanas, puntuaciones_automaticas)
+emb_original = embedding_model.embed_query(original)
+emb_parafrasis = embedding_model.embed_query(parafrasis)
+emb_diferente = embedding_model.embed_query(diferente)
 
-# Accuracy (acuerdo exacto)
-acuerdo = np.mean(np.array(puntuaciones_humanas) == np.array(puntuaciones_automaticas))
+sim_parafrasis = cosine_similarity(emb_original, emb_parafrasis)
+sim_diferente = cosine_similarity(emb_original, emb_diferente)
 
-print(f"\n🔬 Correlación de Pearson: {correlation:.3f}")
-print(f"   P-value: {p_value:.4f} {'✅ Significativo' if p_value < 0.05 else '❌ No significativo'}")
+print(f"\n📍 Original:   '{original}'")
+print(f"📍 Paráfrasis: '{parafrasis}'")
+print(f"   Similitud Coseno: {sim_parafrasis:.3f} ✅ (Detecta equivalencia semántica)")
 
-print(f"\n🔬 Cohen's Kappa: {kappa:.3f}")
-interpretacion = (
-    "Casi perfecto" if kappa > 0.8 else
-    "Sustancial" if kappa > 0.6 else
-    "Moderado" if kappa > 0.4 else "Justo"
-)
-print(f"   Interpretación: {interpretacion}")
+print(f"\n📍 Original:  '{original}'")
+print(f"📍 Diferente: '{diferente}'")
+print(f"   Similitud Coseno: {sim_diferente:.3f} ❌ (Detecta diferencia)")
 
-print(f"\n🔬 Acuerdo Exacto: {acuerdo:.1%}")
-
-print("\n💡 Conclusión:")
-if correlation > 0.6 and p_value < 0.05:
-    print("   La métrica automática es confiable para evaluar calidad.")
-else:
-    print("   La métrica necesita calibración adicional.")
+print("\n🎯 Conclusión:")
+print("   Los embeddings son ideales para:")
+print("   • Búsqueda semántica (encontrar documentos relacionados)")
+print("   • Clustering de textos por tema")
+print("   • Evaluación de similitud global (¿hablan de lo mismo?)")
+print("\n   Pero NO son ideales para detectar errores específicos en generación.")
 
 # %% [markdown]
 """
 ---
 # Módulo 2: Anatomía de un Pipeline de Evaluación
 
-## LLM-as-a-Judge (El LLM como Juez)
+## LLM-as-a-Judge (El LLM como Juez) 
 
 Si las métricas de texto fallan, ¿quién evalúa? Usamos un LLM más potente (o instruido específicamente) para evaluar la calidad de la respuesta de otro LLM.
 
@@ -402,32 +450,138 @@ En lugar de escribir todo a mano, usamos herramientas de grado de producción co
 
 print("🛠️ Configurando TruLens (Simulación)...")
 
-# Definimos las funciones de feedback (Métricas)
-# En TruLens real:
-# from trulens_eval import Feedback, TruChain
-# from trulens_eval.feedback import Groundedness
-# groundedness = Groundedness(groundedness_provider=provider)
-# f_groundedness = Feedback(groundedness.groundedness_measure_with_cot_reasons).on(context).on(output)
-
-def simular_trulens_dashboard():
-    import pandas as pd
+# %%
+# 1. Sistema Mini-RAG (Retrieval-Augmented Generation) con Chroma
+class SimpleRAG:
+    def __init__(self, docs: List[str]):
+        self.docs = docs
+        # Inicializamos Chroma vector store en memoria
+        # En producción, usaríamos persist_directory="./chroma_db"
+        self.vectorstore = Chroma.from_texts(
+            texts=docs,
+            embedding=embedding_model,
+            collection_name="rag_presentation"
+        )
+        self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 2})
+        
+    def retrieve(self, query: str) -> List[str]:
+        """Recupera documentos usando el retriever de Chroma"""
+        docs = self.retriever.invoke(query)
+        return [doc.page_content for doc in docs]
     
-    data = {
-        "app_id": ["RAG_Chatbot_v1", "RAG_Chatbot_v1", "RAG_Chatbot_v1"],
-        "input": ["¿Quién es el CEO?", "¿Precio del plan Pro?", "¿Horario de atención?"],
-        "output": ["El CEO es Juan Pérez.", "Cuesta $20/mes.", "No tengo esa información."],
-        "latency": [1.2, 0.8, 0.5],
-        "total_cost": [0.002, 0.001, 0.0005],
-        "faithfulness": [0.95, 1.0, 0.0], # Score bajo si no responde o alucina
-        "answer_relevance": [1.0, 1.0, 0.2],
-        "context_relevance": [0.8, 0.9, 0.1]
+    def answer(self, query: str) -> Dict[str, Any]:
+        """Genera respuesta usando contexto recuperado"""
+        context_docs = self.retrieve(query)
+        context_str = "\n".join(context_docs)
+        
+        prompt = f"""Usa el siguiente contexto para responder la pregunta. 
+        Si no sabes la respuesta, di "No tengo esa información".
+        
+        Contexto:
+        {context_str}
+        
+        Pregunta: {query}
+        Respuesta:"""
+        
+        response = llm.invoke(prompt).content
+        return {
+            "question": query,
+            "answer": response,
+            "context": context_docs
+        }
+
+# 2. Juez G-Eval (Evaluación con LLM)
+class GEvalRAG:
+    def __init__(self, judge_llm):
+        self.judge = judge_llm
+        
+    def evaluate(self, rag_output: Dict[str, Any]) -> Dict[str, float]:
+        q = rag_output["question"]
+        a = rag_output["answer"]
+        c = "\n".join(rag_output["context"])
+        
+        # Definición de Métricas (Prompts de Juez)
+        metrics = {
+            "faithfulness": f"""
+                Evalúa la FIDELIDAD (0-1): ¿La respuesta se deriva ÚNICAMENTE del contexto?
+                Contexto: {c}
+                Respuesta: {a}
+                Retorna solo un número flotante entre 0.0 y 1.0.
+            """,
+            "answer_relevance": f"""
+                Evalúa la RELEVANCIA DE RESPUESTA (0-1): ¿La respuesta responde directamente a la pregunta?
+                Pregunta: {q}
+                Respuesta: {a}
+                Retorna solo un número flotante entre 0.0 y 1.0.
+            """,
+            "context_relevance": f"""
+                Evalúa la RELEVANCIA DE CONTEXTO (0-1): ¿El contexto contiene información útil para responder la pregunta?
+                Pregunta: {q}
+                Contexto: {c}
+                Retorna solo un número flotante entre 0.0 y 1.0.
+            """
+        }
+        
+        scores = {}
+        for metric_name, prompt in metrics.items():
+            try:
+                # Usamos el LLM para puntuar
+                result = self.judge.invoke(prompt).content.strip()
+                # Extraemos el número (limpieza básica)
+                import re
+                score = float(re.search(r"0\.\d+|1\.0|0|1", result).group())
+                scores[metric_name] = score
+            except Exception as e:
+                print(f"⚠️ Error evaluando {metric_name}: {e}")
+                scores[metric_name] = 0.0
+                
+        return scores
+
+# 3. Ejecución y Evaluación Real
+print("🚀 Iniciando Sistema RAG y Evaluación G-Eval...\n")
+
+# Base de conocimiento simulada
+knowledge_base = [
+    "El CEO de la empresa es Juan Pérez, nombrado en 2023.",
+    "El plan Pro cuesta $20/mes e incluye soporte 24/7.",
+    "El horario de atención es de Lunes a Viernes de 9am a 6pm.",
+    "La política de reembolso permite devoluciones en 30 días."
+]
+
+rag_system = SimpleRAG(knowledge_base)
+evaluator = GEvalRAG(llm)
+
+# Preguntas de prueba
+test_questions = [
+    "¿Quién es el CEO?",           # Fácil, debe tener scores altos
+    "¿Cuánto cuesta el plan Pro?", # Fácil, scores altos
+    "¿Venden helados?",            # Irrelevante, contexto bajo, respuesta "No sé" (fiel pero no útil)
+]
+
+results_data = []
+
+for q in test_questions:
+    print(f"🤖 Procesando: '{q}'")
+    # 1. Ejecutar RAG
+    output = rag_system.answer(q)
+    print(f"   Respuesta: {output['answer']}")
+    
+    # 2. Evaluar con G-Eval
+    scores = evaluator.evaluate(output)
+    
+    # Guardar resultados
+    entry = {
+        "question": q,
+        "answer": output["answer"],
+        "context_preview": output["context"][0][:50] + "...",
+        **scores
     }
-    
-    df = pd.DataFrame(data)
-    print("\n📊 TruLens Leaderboard (Simulado):")
-    print(df.to_markdown(index=False))
+    results_data.append(entry)
 
-simular_trulens_dashboard()
+# Mostrar Dashboard
+df_results = pd.DataFrame(results_data)
+print("\n📊 Dashboard de Evaluación RAG (Real):")
+print(df_results[["question", "faithfulness", "answer_relevance", "context_relevance"]].to_markdown(index=False))
 
 # %% [markdown]
 """
@@ -496,7 +650,6 @@ La confianza requiere seguridad. Antes de enviar una respuesta al usuario, pása
 """
 
 # %%
-from detoxify import Detoxify
 
 def verificar_toxicidad(texto):
     # Carga modelo ligero de detección de toxicidad
@@ -591,7 +744,6 @@ En DSPy, no escribes prompts, escribes **Firmas (Signatures)** (Input -> Output)
 """
 
 # %%
-import dspy
 
 # Configuración simulada de DSPy
 # dspy.settings.configure(lm=dspy.Google("models/gemini-2.0-flash-exp", api_key=GOOGLE_API_KEY))
@@ -662,8 +814,6 @@ Creamos un grafo simple: Entrada -> Validar -> (si ok) Responder / (si no) Error
 """
 
 # %%
-from typing import TypedDict, Literal
-from langgraph.graph import StateGraph, END, START
 
 # 1. Definir el Estado del Grafo
 class AgentState(TypedDict):
