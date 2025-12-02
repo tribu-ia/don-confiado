@@ -74,7 +74,7 @@ from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import CharacterTextSplitter
 
 # Configuración de API Keys
-os.environ["GOOGLE_API_KEY"] = "AIzaSyDMq2JPPFWRueJ5yMWeg86MkRmcGVR7DZo"
+os.environ["GOOGLE_API_KEY"] = ""
 
 # Modelo Principal (Gemini Flash por velocidad y costo)
 llm = ChatGoogleGenerativeAI(
@@ -894,14 +894,7 @@ def generar_testset_sintetico_ragas():
         
     except Exception as e:
         print(f"⚠️ Error en generación Ragas (puede deberse a límites de API o parsing): {e}")
-        # Fallback visual para la demo si falla la API
-        print("\n📦 Testset Generado (Simulado por error de API):")
-        data_sim = [
-            {"question": "¿Cuál es el deducible para pérdida total?", "ground_truth": "$1000 USD", "evolution_type": "simple"},
-            {"question": "Si choco ebrio, ¿me cubre el seguro?", "ground_truth": "No, no cubre conducción bajo alcohol.", "evolution_type": "reasoning"},
-            {"question": "¿Cuántas veces puedo pedir grúa gratis?", "ground_truth": "Hasta 3 eventos por año.", "evolution_type": "simple"}
-        ]
-        print(pd.DataFrame(data_sim).to_markdown(index=False))
+        
 
 # Ejecutamos
 generar_testset_sintetico_ragas()
