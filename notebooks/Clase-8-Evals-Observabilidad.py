@@ -365,16 +365,27 @@ Vamos a construir una métrica de **Fidelidad** desde cero para entender la "mag
 """
 
 # %%
+# %%
+# Definición de Esquemas de Evaluación (Structured Output)
+
 class EvaluacionFidelidad(BaseModel):
     afirmacion: str = Field(description="La afirmación extraída de la respuesta")
     veredicto: str = Field(description="YES si el contexto apoya la afirmación, NO en caso contrario")
     razon: str = Field(description="Breve explicación del veredicto")
 
+class EvaluacionCoherencia(BaseModel):
+    puntuacion: int = Field(description="Puntuación de 1 a 5 sobre la coherencia y claridad")
+    razon: str = Field(description="Justificación de la puntuación")
+
+class EvaluacionCortesia(BaseModel):
+    es_cortes: bool = Field(description="True si la respuesta es amable y profesional")
+    razon: str = Field(description="Justificación del análisis de tono")
+
+# 1. Función de Evaluación de Fidelidad (RAG Metric)
 def evaluar_fidelidad_manual(contexto: str, respuesta: str):
-    print(f"📝 Evaluando respuesta: '{respuesta}'\n")
+    print(f"📝 Evaluando Fidelidad: '{respuesta}'\n")
     
     # Paso 1: Atomizar (Simplificado: separamos por puntos)
-    # En producción, usaríamos un LLM para extraer 'claims' atómicos
     afirmaciones = [f.strip() for f in respuesta.split('.') if len(f.strip()) > 5]
     
     resultados = []
@@ -390,7 +401,6 @@ def evaluar_fidelidad_manual(contexto: str, respuesta: str):
         Responde en formato JSON con: afirmacion, veredicto (YES/NO), razon.
         """
         
-        # Usamos structured output para garantizar el formato
         juez = llm.with_structured_output(EvaluacionFidelidad)
         resultado = juez.invoke(prompt)
         resultados.append(resultado)
@@ -399,30 +409,61 @@ def evaluar_fidelidad_manual(contexto: str, respuesta: str):
         print(f"{icon} Afirmación: {afirmacion}")
         print(f"   Razón: {resultado.razon}")
 
-    # Paso 3: Puntuación
-    if not resultados:
-        return 0.0
-    
+    if not resultados: return 0.0
     positivos = sum(1 for r in resultados if r.veredicto == "YES")
-    score = positivos / len(resultados)
+    return positivos / len(resultados)
+
+# 2. Función de Evaluación de Coherencia (General Metric)
+def evaluar_coherencia(texto: str):
+    print(f"📝 Evaluando Coherencia: '{texto}'")
+    prompt = f"""Evalúa la coherencia y claridad del siguiente texto del 1 al 5.
+    Texto: "{texto}" """
     
-    return score
+    juez = llm.with_structured_output(EvaluacionCoherencia)
+    resultado = juez.invoke(prompt)
+    
+    print(f"⭐️ Puntuación: {resultado.puntuacion}/5")
+    print(f"   Razón: {resultado.razon}\n")
+    return resultado.puntuacion
+
+# 3. Función de Evaluación de Cortesía (Tone Metric)
+def evaluar_cortesia(texto: str):
+    print(f"📝 Evaluando Cortesía: '{texto}'")
+    prompt = f"""Analiza si el siguiente texto es cortés y profesional.
+    Texto: "{texto}" """
+    
+    juez = llm.with_structured_output(EvaluacionCortesia)
+    resultado = juez.invoke(prompt)
+    
+    icon = "🎩" if resultado.es_cortes else "👹"
+    print(f"{icon} Es cortés: {resultado.es_cortes}")
+    print(f"   Razón: {resultado.razon}\n")
+    return resultado.es_cortes
 
 # --- Probando nuestro Juez Manual ---
 
+print("--- TEST 1: Fidelidad (RAG) ---")
 contexto_real = "El proyecto Apollo 11 aterrizó en la Luna en 1969. Neil Armstrong fue el primer humano en pisarla."
 
 # Caso 1: Respuesta Fiel
 respuesta_fiel = "Neil Armstrong caminó sobre la Luna en 1969. Fue parte del Apollo 11."
-print("--- TEST 1: Respuesta Fiel ---")
+print("--- TEST 1a: Respuesta Fiel ---")
 score_fiel = evaluar_fidelidad_manual(contexto_real, respuesta_fiel)
 print(f"🏆 Score Fidelidad: {score_fiel:.2f}\n")
 
 # Caso 2: Alucinación
 respuesta_alucinada = "Neil Armstrong fue a Marte en 1969. Comió pizza allí."
-print("--- TEST 2: Respuesta con Alucinación ---")
+print("--- TEST 1b Respuesta con Alucinación ---")
 score_alucinado = evaluar_fidelidad_manual(contexto_real, respuesta_alucinada)
 print(f"🏆 Score Fidelidad: {score_alucinado:.2f}")
+
+print("\n--- TEST 2: Coherencia (General) ---")
+texto_incoherente = "El gato voló por el subsuelo mientras las nubes ladraban verde."
+evaluar_coherencia(texto_incoherente)
+
+print("--- TEST 3: Cortesía (Tono) ---")
+texto_grosero = "No me molestes con preguntas estúpidas, búscalo tú mismo."
+evaluar_cortesia(texto_grosero)
 
 # %%
 
