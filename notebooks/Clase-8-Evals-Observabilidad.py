@@ -74,7 +74,7 @@ from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import CharacterTextSplitter
 
 # Configuración de API Keys
-os.environ["GOOGLE_API_KEY"] = "AIzaSyBMMj8A6FJcHn3pCPyd3xcHMK8a6mkBtPo"
+os.environ["GOOGLE_API_KEY"] = "AIzaSyDMq2JPPFWRueJ5yMWeg86MkRmcGVR7DZo"
 
 # Modelo Principal (Gemini Flash por velocidad y costo)
 llm = ChatGoogleGenerativeAI(
