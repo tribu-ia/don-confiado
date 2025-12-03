@@ -26,9 +26,9 @@ Instalamos las librerías necesarias para todo el taller.
 
 # %%
 !pip install -q pydantic langchain langchain-google-genai langchain-openai langchain-core langchain-community
-!pip install -q rapidfuzz deepeval ragas
+!pip install -q rapidfuzz deepeval ragas langsmith
 !pip install -q rouge-score bert-score scikit-learn matplotlib nltk pandas
-!pip install -q chromadb langchain-chroma
+!pip install -q chromadb langchain-chroma langgraph
 
 # %%
 import os
@@ -930,5 +930,538 @@ tests:
 3. Ver reporte visual en navegador.
 """
 
+# %% [markdown]
+"""
+---
+# Módulo 7: Observabilidad y Trazabilidad con LangGraph + LangSmith
+
+Los agentes no son lineales; son flujos complejos con bifurcaciones, loops y decisiones. Necesitamos herramientas que:
+1. **Visualicen** el flujo de ejecución
+2. **Traceen** cada paso del agente
+3. **Evalúen** la calidad de las decisiones
+
+**LangGraph**: Framework para construir flujos agénticos con estado.
+**LangSmith**: Plataforma de observabilidad y evaluación.
+
+### Snippet 7.1: Flujo de Escritura con Revisión (LangGraph + LangSmith)
+Creamos un agente que escribe contenido, lo auto-revisa, y decide si necesita reescribir.
+"""
+
+# %%
+# Ejemplo: Agente de Escritura con Auto-Revisión (LangGraph + LangSmith)
+
+from langgraph.graph import StateGraph, END, START
+from typing import TypedDict, Literal
+
+# 1. Configuración de LangSmith (Observabilidad)
+# 
+# 🔑 CÓMO OBTENER TU API KEY DE LANGSMITH:
+# 
+# Paso 1: Crear cuenta en LangSmith
+#   - Visita: https://smith.langchain.com/
+#   - Click en "Sign Up" (puedes usar GitHub/Google)
+#   - Es GRATIS para uso personal (incluye 5,000 traces/mes)
+#
+# Paso 2: Crear un Proyecto
+#   - Una vez logueado, verás el dashboard
+#   - Click en "New Project" o usa el proyecto "default"
+#   - Los proyectos organizan tus traces por aplicación
+#
+# Paso 3: Obtener tu API Key
+#   - Click en tu avatar (esquina superior derecha)
+#   - Selecciona "Settings" → "API Keys"
+#   - Click en "Create API Key"
+#   - Copia la key (solo se muestra una vez!)
+#
+# Paso 4: Configurar en Python
+#   Opción A - Variables de entorno (recomendado):
+os.environ["LANGSMITH_TRACING"] = "true"
+os.environ["LANGSMITH_API_KEY"] = ""  # Pega tu key aquí
+os.environ["LANGSMITH_PROJECT"] = "default"  # Nombre de tu proyecto
+#
+#   Opción B - Archivo .env:
+#   Crea un archivo .env con:
+#   LANGSMITH_TRACING=true
+#   LANGSMITH_API_KEY=lsv2_pt_...
+#   LANGSMITH_PROJECT=clase-evals
+#   
+#   Luego en Python: from dotenv import load_dotenv; load_dotenv()
+#
+# ⚠️  NOTA: Para este demo, el código funciona SIN LangSmith configurado.
+#     Solo se activará el tracing si configuras las variables arriba.
+
+# Para este demo, mostramos cómo funciona sin requerir cuenta de LangSmith
+print("💡 LangSmith Tracing:")
+print("   Para activar observabilidad completa, configura:")
+print("   - LANGSMITH_TRACING=true")
+print("   - LANGSMITH_API_KEY=<tu-key>")
+print("   - LANGSMITH_PROJECT=clase-evals")
+print("   Si no está configurado, el flujo se ejecuta normalmente sin tracing.\n")
+
+# 2. Definir el Estado del Grafo
+class WriterState(TypedDict):
+    topic: str
+    draft: str
+    revision_count: int
+    quality_score: float
+    feedback: str
+    final_output: str
+
+# 3. Definir Nodos (Funciones)
+def research_node(state: WriterState) -> WriterState:
+    """Nodo 1: Investiga el tema"""
+    print(f"📚 [Research] Investigando sobre: {state['topic']}")
+    # Simulación de investigación
+    research_notes = f"Puntos clave sobre {state['topic']}: concepto fundamental en IA, aplicaciones prácticas..."
+    return {"draft": research_notes}
+
+def write_node(state: WriterState) -> WriterState:
+    """Nodo 2: Escribe un borrador"""
+    print(f"✍️  [Writer] Generando borrador (intento #{state.get('revision_count', 0) + 1})")
+    
+    # Si hay feedback, lo incorporamos
+    context = f"Feedback previo: {state.get('feedback', 'Ninguno')}" if state.get('feedback') else ""
+    
+    prompt = f"""Escribe un párrafo educativo sobre: {state['topic']}
+{context}
+
+Borrador:"""
+    
+    draft = llm.invoke(prompt).content
+    return {
+        "draft": draft,
+        "revision_count": state.get("revision_count", 0) + 1
+    }
+
+def review_node(state: WriterState) -> WriterState:
+    """Nodo 3: Revisa la calidad del borrador"""
+    print("⚖️  [Reviewer] Evaluando calidad del borrador...")
+    
+    review_prompt = f"""Evalúa este borrador del 1-10:
+Borrador: {state['draft']}
+
+Devuelve solo un score numérico (1-10) y feedback breve."""
+    
+    review = llm.invoke(review_prompt).content
+    
+    # Intentamos extraer el score (simplificado)
+    try:
+        score = float([word for word in review.split() if word.replace('.','').isdigit()][0])
+    except:
+        score = 6.0  # Default si falla parsing
+    
+    print(f"   Score: {score}/10")
+    
+    return {
+        "quality_score": score,
+        "feedback": review
+    }
+
+def finalize_node(state: WriterState) -> WriterState:
+    """Nodo 4: Finaliza el output"""
+    print("✅ [Finalize] Contenido aprobado!")
+    return {"final_output": state['draft']}
+
+# 4. Definir Lógica Condicional (Router)
+def should_continue(state: WriterState) -> Literal["write", "finalize"]:
+    """Decide si reescribir o finalizar"""
+    quality_score = state.get("quality_score", 0)
+    revision_count = state.get("revision_count", 0)
+    
+    # Criterios de decisión
+    if quality_score >= 7.5:
+        return "finalize"
+    elif revision_count >= 2:
+        print("   ⚠️  Máximo de revisiones alcanzado, finalizando...")
+        return "finalize"
+    else:
+        print("   🔄 Calidad insuficiente, reescribiendo...")
+        return "write"
+
+# 5. Construir el Grafo
+workflow = StateGraph(WriterState)
+
+# Agregar nodos
+workflow.add_node("research", research_node)
+workflow.add_node("write", write_node)
+workflow.add_node("review", review_node)
+workflow.add_node("finalize", finalize_node)
+
+# Definir flujo
+workflow.add_edge(START, "research")
+workflow.add_edge("research", "write")
+workflow.add_edge("write", "review")
+workflow.add_conditional_edges(
+    "review",
+    should_continue,
+    {
+        "write": "write",      # Loop de mejora
+        "finalize": "finalize"
+    }
+)
+workflow.add_edge("finalize", END)
+
+# Compilar el grafo
+app = workflow.compile()
+
+print("\n🕸️  Grafo LangGraph compilado.")
+print("   Flujo: Research → Write → Review → [Loop si score bajo] → Finalize\n")
+
+# 6. Ejecutar el Agente
+print("="*60)
+print("🚀 Ejecutando Agente de Escritura con Auto-Revisión")
+print("="*60 + "\n")
+
+result = app.invoke({
+    "topic": "Evaluación de LLMs",
+    "revision_count": 0
+})
+
+print("\n" + "="*60)
+print("🏁 RESULTADO FINAL")
+print("="*60)
+print(f"\n{result['final_output']}")
+print(f"\nRevisiones realizadas: {result['revision_count']}")
+print(f"Score final: {result.get('quality_score', 'N/A')}/10")
+
+# %% [markdown]
+"""
+### Puntos Clave de Observabilidad
+
+**Con LangSmith activado (variables de entorno configuradas), verías:**
+
+1. **Trace Tree**: Visualización del grafo con cada nodo y decisión.
+2. **Latencias**: Tiempo de ejecución de cada nodo.
+3. **Tokens**: Uso de tokens por llamada al LLM.
+4. **Metadata del Estado**: Evolución de `WriterState` en cada paso.
+5. **Loops**: Cuántas veces se ejecutó el ciclo de revisión.
+
+**Dashboard de LangSmith mostraría:**
+```
+Run: Agente Escritura
+├─ research_node (250ms, 0 tokens)
+├─ write_node (1.2s, 120 tokens)
+├─ review_node (800ms, 50 tokens)
+├─ [Decision: reescribir]
+├─ write_node (1.1s, 115 tokens) # Segunda iteración
+├─ review_node (750ms, 48 tokens)
+├─ [Decision: finalizar]
+└─ finalize_node (10ms, 0 tokens)
+```
+
+**Beneficios:**
+- Debug visual de flujos complejos
+- Identificar cuellos de botella
+- Comparar versiones del agente
+- Detectar loops infinitos
+"""
+
+# %% [markdown]
+"""
+### Snippet 7.2: Experimento de Evaluación con LangSmith
+
+Ahora vamos más allá del simple tracing. Usaremos LangSmith para:
+1. Crear un **Dataset** de prueba
+2. Definir una **función objetivo** (nuestro LLM)
+3. Crear **evaluadores** automáticos
+4. **Ejecutar el experimento** y obtener métricas
+"""
+
+# %%
+# Experimento de Evaluación con LangSmith
+
+from langsmith import Client
+from langsmith.evaluation import evaluate
+
+# Inicializamos el cliente de LangSmith
+client = Client()
+
+print("🧪 Experimento de Evaluación con LangSmith")
+print("=" * 60 + "\n")
+
+# 1. CREAR DATASET CON EJEMPLOS REALES
+# Primero generamos respuestas reales con Gemini para usar como ground truth
+dataset_name = "python-qa-eval-demo"
+
+print("📦 Paso 1: Creando Dataset con Ejemplos Reales de Gemini...")
+
+# Definimos las preguntas que queremos usar
+questions = [
+    "¿Qué es una lista en Python?",
+    "¿Cómo se define una función en Python?",
+    "¿Qué hace el método append()?",
+    "¿Cuál es la diferencia entre '==' y 'is'?",
+    "¿Para qué sirve el decorador @property en Python?"
+]
+
+# Primero verificamos si el dataset ya existe
+try:
+    dataset = client.read_dataset(dataset_name=dataset_name)
+    print(f"   ℹ️  Dataset '{dataset_name}' ya existe, reutilizando")
+    
+    # Contamos cuántos ejemplos tiene
+    existing_examples = list(client.list_examples(dataset_id=dataset.id))
+    print(f"   📊 Dataset contiene {len(existing_examples)} ejemplos")
+    
+    # Solo generamos si el dataset está vacío o tiene menos ejemplos de los que queremos
+    if len(existing_examples) >= len(questions):
+        print("   ✅ Dataset tiene suficientes ejemplos, omitiendo generación\n")
+        examples = []  # No necesitamos regenerar
+    else:
+        print(f"   🔄 Dataset tiene solo {len(existing_examples)} ejemplos, generando {len(questions) - len(existing_examples)} más...\n")
+        # Generamos solo los faltantes
+        questions_to_generate = questions[len(existing_examples):]
+        examples = []
+        for i, question in enumerate(questions_to_generate, len(existing_examples) + 1):
+            print(f"   [{i}/{len(questions)}] Pregunta: {question[:50]}...")
+            
+            reference_prompt = f"""Eres un experto profesor de Python. Responde de forma concisa, precisa y educativa.
+
+Pregunta: {question}
+
+Respuesta (máximo 2 oraciones):"""
+            
+            reference_answer = llm.invoke(reference_prompt).content.strip()
+            
+            examples.append({
+                "inputs": {"question": question},
+                "outputs": {"answer": reference_answer}
+            })
+            
+            print(f"       ✅ Respuesta: {reference_answer[:60]}...")
+        
+        print(f"\n   📊 {len(examples)} ejemplos nuevos generados\n")
+        
+except Exception:
+    # El dataset no existe, lo creamos con todos los ejemplos
+    print(f"   📝 Dataset '{dataset_name}' no existe, creando nuevo...")
+    
+    dataset = client.create_dataset(dataset_name)
+    print(f"   ✅ Dataset '{dataset_name}' creado")
+    
+    print(f"\n   🤖 Generando {len(questions)} respuestas de referencia con Gemini...\n")
+    
+    # Generamos respuestas reales con Gemini como "ground truth"
+    examples = []
+    for i, question in enumerate(questions, 1):
+        print(f"   [{i}/{len(questions)}] Pregunta: {question[:50]}...")
+        
+        # Usamos un prompt específico para obtener respuestas de calidad como referencia
+        reference_prompt = f"""Eres un experto profesor de Python. Responde de forma concisa, precisa y educativa.
+
+Pregunta: {question}
+
+Respuesta (máximo 2 oraciones):"""
+        
+        reference_answer = llm.invoke(reference_prompt).content.strip()
+        
+        examples.append({
+            "inputs": {"question": question},
+            "outputs": {"answer": reference_answer}
+        })
+        
+        print(f"       ✅ Respuesta: {reference_answer[:60]}...")
+    
+    print(f"\n   📊 {len(examples)} ejemplos reales generados\n")
+
+# Agregamos solo los ejemplos nuevos al dataset (si los hay)
+if examples:
+    for example in examples:
+        try:
+            client.create_example(
+                inputs=example["inputs"],
+                outputs=example["outputs"],
+                dataset_id=dataset.id
+            )
+        except Exception:
+            pass  # El ejemplo ya existe
+    
+    print(f"   ✅ {len(examples)} ejemplos agregados al dataset\n")
+
+
+# 2. DEFINIR FUNCIÓN OBJETIVO
+# Esta es la función que queremos evaluar (nuestro LLM respondiendo preguntas)
+print("🎯 Paso 2: Definiendo Función Objetivo...")
+
+def ask_python_question(inputs: dict) -> dict:
+    """
+    Función objetivo: Usa Gemini para responder preguntas sobre Python
+    """
+    question = inputs["question"]
+    
+    prompt = f"""Eres un experto en Python. Responde de forma concisa y precisa.
+
+Pregunta: {question}
+
+Respuesta:"""
+    
+    response = llm.invoke(prompt).content
+    
+    return {"answer": response}
+
+print("   ✅ Función objetivo definida (usa Gemini para responder)\n")
+
+# 3. DEFINIR EVALUADORES
+# Usamos DeepEval con el wrapper de Gemini (mismo enfoque que Módulo 4)
+print("⚖️  Paso 3: Definiendo Evaluadores...")
+
+# Creamos el wrapper de DeepEval para Gemini (reutilizamos la clase del Módulo 4)
+from deepeval.models.base_model import DeepEvalBaseLLM
+
+class DeepEvalGemini(DeepEvalBaseLLM):
+    def __init__(self, gemini_llm):
+        self.gemini_llm = gemini_llm
+    
+    def load_model(self):
+        return self.gemini_llm
+    
+    def generate(self, prompt: str) -> str:
+        response = self.gemini_llm.invoke(prompt)
+        return response.content
+    
+    async def a_generate(self, prompt: str) -> str:
+        # Versión async (usando sync por simplicidad)
+        return self.generate(prompt)
+    
+    def get_model_name(self) -> str:
+        return "gemini-2.5-flash"
+
+# Instanciamos el wrapper
+deepeval_llm = DeepEvalGemini(llm)
+
+# Evaluador 1: Correctness usando DeepEval AnswerRelevancyMetric
+from deepeval.metrics import AnswerRelevancyMetric
+from deepeval.test_case import LLMTestCase
+
+def correctness_evaluator(run, example) -> dict:
+    """
+    Evaluador usando DeepEval - compara respuesta generada con esperada
+    """
+    metric = AnswerRelevancyMetric(
+        threshold=0.7,
+        model=deepeval_llm,
+        include_reason=True
+    )
+    
+    # Creamos el test case
+    test_case = LLMTestCase(
+        input=example.inputs["question"],
+        actual_output=run.outputs["answer"],
+        expected_output=example.outputs["answer"]
+    )
+    
+    # Medimos
+    metric.measure(test_case)
+    
+    return {
+        "key": "correctness",
+        "score": metric.score
+    }
+
+print("   ✅ Evaluador 'correctness' creado con DeepEval (AnswerRelevancyMetric)")
+
+# Evaluador 2: Length Quality (heurística simple)
+def answer_length_evaluator(run, example) -> dict:
+    """
+    Evaluador 2: Penaliza respuestas excesivamente largas o cortas
+    """
+    answer = run.outputs["answer"]
+    word_count = len(answer.split())
+    
+    # Longitud ideal: 20-50 palabras
+    if 20 <= word_count <= 50:
+        score = 1.0
+    elif word_count < 10:
+        score = 0.3  # Muy corta
+    elif word_count > 100:
+        score = 0.5  # Muy larga
+    else:
+        score = 0.7  # Aceptable
+    
+    return {
+        "key": "length_quality",
+        "score": score
+    }
+
+print("   ✅ Evaluador 'length_quality' creado (heurística)")
+print("\n   📋 Resumen de Evaluadores:")
+print("      - Correctness: DeepEval AnswerRelevancyMetric")
+print("      - Length Quality: Heurística basada en longitud\n")
+
+# 4. EJECUTAR EXPERIMENTO
+print("🚀 Paso 4: Ejecutando Experimento...")
+print("   (Esto tomará unos segundos...)\n")
+
+experiment_results = evaluate(
+    ask_python_question,
+    data=dataset_name,
+    evaluators=[correctness_evaluator, answer_length_evaluator],
+    experiment_prefix="python-qa-v1",
+    metadata={
+        "model": "gemini-2.5-flash",
+        "temperature": 0.1,
+        "version": "1.0"
+    }
+)
+
+# 5. MOSTRAR RESULTADOS
+print("\n" + "=" * 60)
+print("📊 RESULTADOS DEL EXPERIMENTO")
+print("=" * 60 + "\n")
+
+print(f"✅ Experimento completado: {experiment_results['experiment_name']}")
+print(f"📈 URL del experimento: {experiment_results.get('experiment_url', 'N/A')}")
+print(f"\n📊 Métricas Agregadas:")
+
+# Promediamos los scores
+if 'results' in experiment_results:
+    correctness_scores = []
+    length_scores = []
+    
+    for result in experiment_results['results']:
+        if 'evaluation_results' in result:
+            for eval_result in result['evaluation_results']['results']:
+                if eval_result['key'] == 'correctness':
+                    correctness_scores.append(eval_result['score'])
+                elif eval_result['key'] == 'length_quality':
+                    length_scores.append(eval_result['score'])
+    
+    if correctness_scores:
+        avg_correctness = sum(correctness_scores) / len(correctness_scores)
+        print(f"   - Correctness Promedio: {avg_correctness:.2%}")
+    
+    if length_scores:
+        avg_length = sum(length_scores) / len(length_scores)
+        print(f"   - Length Quality Promedio: {avg_length:.2%}")
+
+print("\n💡 Visita el dashboard de LangSmith para ver:")
+print("   - Comparación lado a lado de respuestas")
+print("   - Distribución de scores")
+print("   - Casos de falla para análisis")
+print("   - Trazas completas de cada ejecución")
+
+# %% [markdown]
+"""
+### 🎓 Conclusiones del Experimento
+
+**Lo que acabamos de hacer:**
+1. ✅ Creamos un **dataset reutilizable** en LangSmith
+2. ✅ Definimos una **función objetivo** (nuestro LLM)
+3. ✅ Implementamos **evaluadores automáticos** (correctness + heurística)
+4. ✅ Ejecutamos el **experimento completo**
+5. ✅ Obtuvimos **métricas agregadas**
+
+**Próximos pasos:**
+- **Iterar**: Mejora el prompt y vuelve a evaluar (LangSmith guarda el historial)
+- **Comparar**: Ejecuta con diferentes modelos (GPT-4 vs Gemini vs Claude)
+- **Escalar**: Agrega más ejemplos al dataset
+- **Refinar**: Crea evaluadores más sofisticados (bias, toxicity, etc.)
+
+**Ventajas de LangSmith:**
+- 📊 Tracking automático de experimentos
+- 🔄 Reproducibilidad (versiona prompts y configs)
+- 📈 Visualización de mejoras entre versiones
+- 🐛 Debug de casos específicos de falla
+"""
 
 
