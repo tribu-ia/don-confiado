@@ -99,6 +99,11 @@ class ReportWebService:
 
     def __init__(self):
         load_dotenv()
+        
+        # Enable LangSmith Tracing
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "Don Confiado Backend")
+        
         self.GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
         # Keep LLM allocated for future real nodes; mocks do not use it.
         self.llm = init_chat_model("gemini-2.5-flash", model_provider="google_genai", api_key=self.GOOGLE_API_KEY)
