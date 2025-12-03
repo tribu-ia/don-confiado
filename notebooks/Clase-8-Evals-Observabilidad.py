@@ -1409,36 +1409,89 @@ print("\n" + "=" * 60)
 print("📊 RESULTADOS DEL EXPERIMENTO")
 print("=" * 60 + "\n")
 
-print(f"✅ Experimento completado: {experiment_results['experiment_name']}")
-print(f"📈 URL del experimento: {experiment_results.get('experiment_url', 'N/A')}")
+# experiment_results es un objeto ExperimentResults, no un dict
+print(f"✅ Experimento completado: {experiment_results.experiment_name}")
+
+# Verificamos si tiene URL
+if hasattr(experiment_results, 'experiment_url') and experiment_results.experiment_url:
+    print(f"📈 URL del experimento: {experiment_results.experiment_url}")
+else:
+    print(f"📈 Ver resultados en: https://smith.langchain.com/")
+
 print(f"\n📊 Métricas Agregadas:")
 
-# Promediamos los scores
-if 'results' in experiment_results:
-    correctness_scores = []
-    length_scores = []
+# Accedemos a los resultados como atributos
+correctness_scores = []
+length_scores = []
+
+# Iteramos sobre los resultados
+for result in experiment_results.results:
+    # result.evaluation_results es un dict con 'results'
+    eval_results = result["evaluation_results"]["results"]
     
-    for result in experiment_results['results']:
-        if 'evaluation_results' in result:
-            for eval_result in result['evaluation_results']['results']:
-                if eval_result['key'] == 'correctness':
-                    correctness_scores.append(eval_result['score'])
-                elif eval_result['key'] == 'length_quality':
-                    length_scores.append(eval_result['score'])
-    
-    if correctness_scores:
-        avg_correctness = sum(correctness_scores) / len(correctness_scores)
-        print(f"   - Correctness Promedio: {avg_correctness:.2%}")
-    
-    if length_scores:
-        avg_length = sum(length_scores) / len(length_scores)
-        print(f"   - Length Quality Promedio: {avg_length:.2%}")
+    for eval_result in eval_results:
+        if eval_result["key"] == "correctness":
+            correctness_scores.append(eval_result["score"])
+        elif eval_result["key"] == "length_quality":
+            length_scores.append(eval_result["score"])
+
+if correctness_scores:
+    avg_correctness = sum(correctness_scores) / len(correctness_scores)
+    print(f"   - Correctness Promedio: {avg_correctness:.2%}")
+
+if length_scores:
+    avg_length = sum(length_scores) / len(length_scores)
+    print(f"   - Length Quality Promedio: {avg_length:.2%}")
 
 print("\n💡 Visita el dashboard de LangSmith para ver:")
 print("   - Comparación lado a lado de respuestas")
 print("   - Distribución de scores")
 print("   - Casos de falla para análisis")
 print("   - Trazas completas de cada ejecución")
+
+# %%
+# CELL SEPARADA: Mostrar Resultados del Experimento
+# (Esta celda puede ejecutarse después del experimento para ver resultados)
+
+print("\n" + "=" * 60)
+print("📊 RESULTADOS DEL EXPERIMENTO")
+print("=" * 60 + "\n")
+
+# experiment_results es un objeto ExperimentResults
+print(f"✅ Experimento: {experiment_results.experiment_name}")
+
+# URL del experimento
+if hasattr(experiment_results, 'experiment_url') and experiment_results.experiment_url:
+    print(f"📈 {experiment_results.experiment_url}")
+else:
+    print(f"📈 Dashboard: https://smith.langchain.com/")
+
+print(f"\n📊 Resumen de Métricas:")
+
+try:
+    # Accedemos a feedback_stats (atributo correcto de ExperimentResults)
+    if hasattr(experiment_results, 'feedback_stats') and experiment_results.feedback_stats:
+        print("\n   Feedback Stats por Evaluador:")
+        for key, stats in experiment_results.feedback_stats.items():
+            print(f"   - {key}:")
+            if 'avg' in stats:
+                print(f"      • Promedio: {stats['avg']:.2%}")
+            if 'count' in stats:
+                print(f"      • Evaluaciones: {stats['count']}")
+    
+    # También podemos acceder a run_stats para métricas de ejecución
+    if hasattr(experiment_results, 'run_stats') and experiment_results.run_stats:
+        print("\n   Stats de Ejecución:")
+        if 'avg_latency' in experiment_results.run_stats:
+            print(f"   - Latencia Promedio: {experiment_results.run_stats['avg_latency']:.2f}s")
+        if 'total_cost' in experiment_results.run_stats:
+            print(f"   - Costo Total: ${experiment_results.run_stats['total_cost']:.4f}")
+    
+    print(f"\n   💡 Para análisis detallado, visita el dashboard de LangSmith")
+    
+except Exception as e:
+    print(f"   ⚠️  Error procesando resultados: {e}")
+    print(f"   💡 Visita https://smith.langchain.com/ para ver resultados completos")
 
 # %% [markdown]
 """
