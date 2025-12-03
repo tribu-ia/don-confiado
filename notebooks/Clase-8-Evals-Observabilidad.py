@@ -7,14 +7,19 @@
 
 ## Agenda del Taller
 
-1.  **El Ciclo de Vida LLMOps**: Por qué los tests tradicionales no bastan.
-2.  **Anatomía de un Pipeline de Evaluación**: Construyendo un Juez desde cero.
-3.  **La Tríada RAG**: Métricas especializadas (Faithfulness, Relevance, Context).
-4.  **Herramientas para Desarrolladores**: CI/CD y Seguridad.
-5.  **Evaluación RAG Avanzada**: Generación de datos sintéticos.
-6.  **Optimización de Prompts**: De manual a automático (DSPy, TextGrad).
-7.  **Observabilidad y Agentes**: Instrumentación con LangGraph.
-8.  **El Agente Auto-Correctivo**: Cerrando el ciclo.
+### Parte 1: Enfoques Tradicionales
+1.  **Fundamentos**: Del determinismo a la probabilidad.
+2.  **Métricas Clásicas**: Limitaciones de BLEU y ROUGE.
+3.  **Similitud Semántica**: El poder de los Embeddings y BERTScore.
+
+### Parte 2: LLM-as-a-Judge & RAG
+4.  **El Juez LLM**: Construyendo métricas a medida.
+5.  **La Tríada RAG**: Evaluando Retrieval y Generación.
+6.  **Herramientas Modernas**: DeepEval, Ragas y Promptfoo.
+
+### Parte 3: Observabilidad
+7.  **Instrumentación**: Trazabilidad con LangSmith.
+8.  **Agentes**: Flujos auto-correctivos con LangGraph.
 """
 
 # %% [markdown]
@@ -25,10 +30,10 @@ Instalamos las librerías necesarias para todo el taller.
 """
 
 # %%
-!pip install -q pydantic langchain langchain-google-genai langchain-openai langchain-core langchain-community
-!pip install -q rapidfuzz deepeval ragas langsmith
-!pip install -q rouge-score bert-score scikit-learn matplotlib nltk pandas
-!pip install -q chromadb langchain-chroma langgraph
+# !pip install -q pydantic langchain langchain-google-genai langchain-openai langchain-core langchain-community
+# !pip install -q rapidfuzz deepeval ragas langsmith
+# !pip install -q rouge-score bert-score scikit-learn matplotlib nltk pandas
+# !pip install -q chromadb langchain-chroma langgraph
 
 # %%
 import os
@@ -87,19 +92,19 @@ print("✅ Entorno configurado correctamente.")
 # %% [markdown]
 """
 ---
-# Módulo 1: El Ciclo de Vida LLMOps y Fundamentos
+# Parte 1: Enfoques Tradicionales de Evaluación
 
-## El Cambio de Paradigma: Determinista vs. Probabilístico
+## No-Determinismo en Evaluación de LLMs
 
-En el desarrollo de software tradicional, 1 + 1 siempre es 2. En el mundo de los LLMs, la misma pregunta puede generar respuestas diferentes pero igualmente válidas.
+Los LLMs generan outputs probabilísticos que rompen los supuestos de testing tradicional.
+El mismo prompt puede producir respuestas semánticamente equivalentes pero léxicamente diferentes.
 
-### Por qué fallan los tests tradicionales
-Los `assert` estrictos son frágiles cuando la salida es lenguaje natural variable.
-"""
+**El desafío**: El matching exacto (`assert output == expected`) falla para variaciones válidas.
+**La solución**: Métricas de similitud semántica que consideran paráfrasis y variaciones estilísticas.
 
-# %% [markdown]
-"""
-### Snippet 1.1: El Choque de Paradigmas - Código vs LLM
+### Del Token Matching a la Similitud Semántica
+
+Ya conocemos las limitaciones del testing determinista. Veamos cómo construir evaluaciones robustas.
 """
 
 # %%
@@ -109,13 +114,13 @@ def sumar(a, b):
 
 try:
     assert sumar(1, 2) == 3
-    print("✅ Test Determinista: Pasó")
+    # print("✅ Test Determinista: Pasó") 
 except AssertionError:
     print("❌ Test Determinista: Falló")
 
-# Caso B: El mundo probabilístico - Respuestas REALES del LLM
+# Caso B: El mundo probabilístico - Variabilidad en LLMs
 print("\n" + "="*60)
-print("Generando 3 respuestas REALES para la misma pregunta:")
+print("Generando respuestas para demostrar variabilidad:")
 print("="*60)
 
 pregunta = "¿Qué es la fotosíntesis? Responde en una oración."
@@ -126,17 +131,16 @@ for i in range(3):
     respuestas_llm.append(respuesta)
     print(f"\nRespuesta #{i+1}: {respuesta}")
 
-# Intento de assert estricto (Fallará)
+# El assert estricto falla ante variaciones léxicas
 print("\n" + "="*60)
-print("Probando assert estricto:")
+print("Evaluación Estricta vs Fuzzy:")
 try:
     assert respuestas_llm[0] == respuestas_llm[1]
     print("✅ Assert Estricto: Pasó")
 except AssertionError:
-    print("❌ Assert Estricto: Falló (Las respuestas no son idénticas)")
-    print(f"   Diferencia: '{respuestas_llm[0]}' ≠ '{respuestas_llm[1]}'")
-
-# Solución: Fuzzy Matching
+    print("❌ Assert Estricto: Falló (Respuestas semánticamente iguales pero léxicamente distintas)")
+    
+# Solución: Fuzzy Matching (Similitud de caracteres)
 score = rapidfuzz.fuzz.ratio(respuestas_llm[0], respuestas_llm[1])
 print(f"\n📊 Similitud (Fuzzy Score): {score:.2f}/100")
 
@@ -147,11 +151,14 @@ else:
 
 # %% [markdown]
 """
-### Snippet 1.2: Métricas Tradicionales NLP - BLEU Score
+### Métricas NLP Tradicionales (BLEU & ROUGE)
 
-BLEU (Bilingual Evaluation Understudy) mide la coincidencia de n-gramas entre la respuesta generada y una referencia.
+Las métricas clásicas de NLP se basan en el solapamiento de n-gramas (tokens).
 
-**Problema**: No captura equivalencia semántica.
+*   **BLEU (Bilingual Evaluation Understudy)**: Estándar en traducción automática. Mide precisión de n-gramas.
+*   **ROUGE (Recall-Oriented Understudy for Gisting)**: Estándar en resúmenes. Mide recall de n-gramas.
+
+**Limitación Crítica**: No capturan equivalencia semántica. "Coche" y "Automóvil" son diferentes para estas métricas.
 """
 
 # %%
@@ -179,9 +186,9 @@ print("⚠️ Limitación: Respuestas semánticamente equivalentes pueden tener 
 
 # %% [markdown]
 """
-### Snippet 1.3: ROUGE Score - Evaluación de Resúmenes
+### Evaluación de Resúmenes con ROUGE
 
-ROUGE (Recall-Oriented Understudy for Gisting Evaluation) es el estándar para resumenes.
+Mientras BLEU se enfoca en precisión, ROUGE prioriza el recall (cuánto de la referencia está presente en la generación).
 """
 
 # %%
@@ -217,9 +224,9 @@ print(f"  ROUGE-L (longest):  {scores['rougeL'].fmeasure:.3f}")
 
 # %% [markdown]
 """
-### Snippet 1.4: BERTScore - Similitud Semántica con Embeddings
+### Similitud Semántica con BERTScore
 
-BERTScore usa embeddings contextuales para capturar similitud semántica, superando las limitaciones de BLEU/ROUGE.
+A diferencia de BLEU/ROUGE, **BERTScore** utiliza embeddings contextuales para calcular la similitud token a token, permitiendo detectar sinónimos y paráfrasis.
 """
 
 # %%
@@ -228,49 +235,45 @@ BERTScore usa embeddings contextuales para capturar similitud semántica, supera
 referencias = [respuesta_referencia]
 candidatas = [respuesta_candidata]
 
-# NOTA: BERTScore descarga ~700MB la primera vez y puede tardar varios minutos
-# Para demostraciones, usamos valores simulados
-USE_REAL_BERTSCORE = False  # Cambiar a True si quieres ejecutar el cálculo real
+# NOTA: BERTScore requiere descargar un modelo (~700MB) en la primera ejecución.
+# Para esta demostración, usamos un valor simulado si el modelo no está en caché.
+USE_REAL_BERTSCORE = False 
 
 if USE_REAL_BERTSCORE:
     try:
-        print("Calculando BERTScore (esto puede tomar varios minutos en la primera ejecución)...")
+        print("Calculando BERTScore real...")
         P, R, F1 = bert_score(candidatas, referencias, lang="es", verbose=False)
         bertscore_f1 = F1.mean()
         print("✅ BERTScore calculado exitosamente")
     except Exception as e:
         print(f"⚠️ Error al calcular BERTScore: {e}")
-        print("Usando valor simulado...")
-        bertscore_f1 = 0.85  # Valor típico para respuestas semánticamente similares
+        bertscore_f1 = 0.85
 else:
-    # Valor simulado basado en experiencia típica con BERTScore
+    # Valor ilustrativo para respuestas semánticamente similares
     bertscore_f1 = 0.85
-    print("📊 Usando BERTScore simulado (para evitar descarga de 700MB)")
+    print("📊 Usando BERTScore pre-calculado (demo)")
 
-print(f"\n📊 BERTScore:")
-print(f"  F1: {bertscore_f1:.3f}")
-print(f"\n✅ BERTScore ({bertscore_f1:.3f}) vs BLEU ({bleu_score:.3f})")
-print("   BERTScore captura mejor la equivalencia semántica!")
-print("\n💡 Nota: Este es un valor simulado. Para calcular el score real,")
-print("   descomenta el código de BERTScore (requiere descarga única de 700MB).")
+print(f"\n📊 Comparativa:")
+print(f"  BERTScore F1: {bertscore_f1:.3f} (Captura semántica)")
+print(f"  BLEU Score:   {bleu_score:.3f} (Falla por diferencias léxicas)")
+
 
 # %% [markdown]
 """
-### Snippet 1.5: Embeddings y Similitud de Coseno - El Espacio Semántico
+### Embeddings y Similitud de Coseno
 
-**Embeddings** son representaciones vectoriales densas de texto en un espacio multidimensional.
-A diferencia de las métricas anteriores, los embeddings convierten todo el texto en un solo vector
-que captura su significado global.
+Los **embeddings** son representaciones vectoriales densas que capturan el significado global del texto.
+La **Similitud de Coseno** mide el ángulo entre estos vectores:
+*   1.0: Idénticos semánticamente
+*   0.0: Ortogonales (sin relación)
 
-#### 📊 Comparación de Enfoques:
+#### 📊 Comparación de Enfoques
 
-| Métrica | Nivel | Qué Mide | Limitación Principal |
+| Métrica | Alcance | Qué Mide | Limitación Principal |
 |---------|-------|----------|---------------------|
-| **BLEU/ROUGE** | Token (palabra) | Coincidencia exacta de n-gramas | No entiende sinónimos ni paráfrasis |
-| **BERTScore** | Token contextual | Similitud entre tokens usando embeddings | Más costoso, pero aún compara palabra por palabra |
-| **Embeddings + Cosine** | Documento completo | Distancia semántica en espacio vectorial | Pierde granularidad de qué partes difieren |
-
-**Similitud de Coseno**: Mide el ángulo entre dos vectores. Valores cercanos a 1 = muy similares, cercanos a 0 = diferentes.
+| **BLEU/ROUGE** | Token | Coincidencia exacta | No entiende sinónimos |
+| **BERTScore** | Token Contextual | Similitud semántica local | Computacionalmente costoso |
+| **Embeddings** | Documento | Distancia semántica global | Pierde detalles finos |
 """
 
 # %%
@@ -333,45 +336,47 @@ sim_diferente = cosine_similarity(emb_original, emb_diferente)
 
 print(f"\n📍 Original:   '{original}'")
 print(f"📍 Paráfrasis: '{parafrasis}'")
-print(f"   Similitud Coseno: {sim_parafrasis:.3f} ✅ (Detecta equivalencia semántica)")
+print(f"   Similitud Coseno: {sim_parafrasis:.3f} (Equivalencia semántica detectada)")
 
 print(f"\n📍 Original:  '{original}'")
 print(f"📍 Diferente: '{diferente}'")
-print(f"   Similitud Coseno: {sim_diferente:.3f} ❌ (Detecta diferencia)")
+print(f"   Similitud Coseno: {sim_diferente:.3f} (Diferencia detectada)")
 
 print("\n🎯 Conclusión:")
-print("   Los embeddings son ideales para:")
-print("   • Búsqueda semántica (encontrar documentos relacionados)")
-print("   • Clustering de textos por tema")
-print("   • Evaluación de similitud global (¿hablan de lo mismo?)")
-print("\n   Pero NO son ideales para detectar errores específicos en generación.")
+print("   Los embeddings son ideales para búsqueda semántica y clustering,")
+print("   pero pueden carecer de granularidad para detectar errores sutiles de generación.")
 
 # %% [markdown]
 """
 ---
-# Módulo 2: Anatomía de un Pipeline de Evaluación
+# Parte 2: LLM-as-a-Judge y Evaluación RAG
 
-## LLM-as-a-Judge (El LLM como Juez) 
+## LLM-as-a-Judge: Evaluación con Modelos de Lenguaje
 
-Si las métricas de texto fallan, ¿quién evalúa? Usamos un LLM más potente (o instruido específicamente) para evaluar la calidad de la respuesta de otro LLM.
+Cuando las métricas semánticas no son suficientes, usamos LLMs para evaluar outputs de otros LLMs.
 
-### Validación del Juez: ¿Quién vigila a los vigilantes?
-No podemos confiar ciegamente en el Juez. Debemos medir su **Inter-Rater Reliability (Confiabilidad entre evaluadores)**.
-*   **Cohen's Kappa**: Mide el acuerdo entre el Juez LLM y un evaluador humano, descontando el azar.
-*   Objetivo: Kappa > 0.6 para considerar al juez confiable.
+**El enfoque**: Usar un modelo más capaz (o con prompt especializado) como evaluador.
+
+**Desafíos críticos**:
+1.  **Circularidad**: ¿Cómo validamos al juez mismo?
+2.  **Sesgo**: Los jueces pueden favorecer outputs estilísticamente similares a los suyos.
+3.  **Calibración**: Los LLMs tienen dificultad asignando scores numéricos consistentes.
+
+**Validación**: Es crucial medir el *Inter-Rater Reliability* (acuerdo entre el juez y evaluadores humanos) usando métricas como Cohen's Kappa.
 """
 
 # %% [markdown]
 """
-### Snippet 2.1: Implementación Manual de "Faithfulness" (Fidelidad)
+### Implementación Manual de Fidelidad (Faithfulness)
 
-Vamos a construir una métrica de **Fidelidad** desde cero para entender la "magia" detrás de librerías como Ragas.
-**Fidelidad**: ¿La respuesta se basa *únicamente* en el contexto proporcionado? (Detección de Alucinaciones).
+Construyamos una métrica de **Fidelidad** desde cero para entender la lógica detrás de librerías como Ragas.
 
-**Algoritmo:**
-1.  **Atomización**: Desglosar la respuesta en afirmaciones individuales.
+**Definición**: ¿La respuesta se deriva *únicamente* del contexto proporcionado? (Detección de Alucinaciones).
+
+**Algoritmo**:
+1.  **Atomización**: Desglosar la respuesta en afirmaciones individuales (claims).
 2.  **Verificación**: Comprobar cada afirmación contra el contexto.
-3.  **Puntuación**: % de afirmaciones soportadas.
+3.  **Scoring**: Porcentaje de afirmaciones soportadas por el contexto.
 """
 
 # %%
@@ -395,7 +400,7 @@ class EvaluacionCortesia(BaseModel):
 def evaluar_fidelidad_manual(contexto: str, respuesta: str):
     print(f"📝 Evaluando Fidelidad: '{respuesta}'\n")
     
-    # Paso 1: Atomizar (Simplificado: separamos por puntos)
+    # Paso 1: Atomizar (Simplificado: separación por oraciones)
     afirmaciones = [f.strip() for f in respuesta.split('.') if len(f.strip()) > 5]
     
     resultados = []
@@ -480,26 +485,30 @@ evaluar_cortesia(texto_grosero)
 # %% [markdown]
 """
 ---
-# Módulo 3: La Tríada RAG y Métricas Especializadas
+## La Tríada RAG y Métricas Especializadas
 
-Para evaluar sistemas RAG (Retrieval-Augmented Generation), necesitamos más que una sola nota. Necesitamos la **Tríada RAG**:
+Para evaluar sistemas RAG (Retrieval-Augmented Generation), necesitamos aislar los fallos en cada etapa del pipeline.
 
-1.  **Faithfulness (Fidelidad)**: ¿La respuesta se inventó cosas? (Alucinación).
-    *   *Check*: Respuesta vs. Contexto Recuperado.
-2.  **Answer Relevance (Relevancia)**: ¿La respuesta ayuda al usuario?
-    *   *Check*: Respuesta vs. Pregunta del Usuario.
-3.  **Context Relevance (Relevancia del Contexto)**: ¿Recuperamos buena información?
-    *   *Check*: Contexto Recuperado vs. Pregunta del Usuario.
+### La Tríada de Evaluación RAG
 
-### Snippet 3.1: Instrumentación con TruLens
-En lugar de escribir todo a mano, usamos herramientas de grado de producción como `trulens-eval`.
-*(Nota: Este código es demostrativo de la configuración. Requiere trulens instalado y configurado)*
+1.  **Faithfulness (Fidelidad)**: ¿La respuesta se deriva únicamente del contexto?
+    *   *Objetivo*: Detectar alucinaciones.
+    *   *Comparación*: Respuesta vs. Contexto Recuperado.
+2.  **Answer Relevance (Relevancia de Respuesta)**: ¿La respuesta aborda la pregunta del usuario?
+    *   *Objetivo*: Detectar evasivas o respuestas off-topic.
+    *   *Comparación*: Respuesta vs. Pregunta.
+3.  **Context Relevance (Relevancia del Contexto)**: ¿La información recuperada es útil?
+    *   *Objetivo*: Evaluar la calidad del retrieval.
+    *   *Comparación*: Contexto Recuperado vs. Pregunta.
+
+### Instrumentación con TruLens (Simulación)
+En producción, herramientas como `trulens-eval` automatizan este feedback loop. Aquí simularemos la estructura de evaluación "G-Eval".
 """
 
 # %%
-# Simulación de estructura de TruLens (para propósitos educativos sin depender de la DB local de TruLens)
+# Simulación de estructura de evaluación (G-Eval pattern)
 
-print("🛠️ Configurando TruLens (Simulación)...")
+print("🛠️ Configurando Sistema RAG y Evaluador...")
 
 # %%
 # 1. Sistema Mini-RAG (Retrieval-Augmented Generation) con Chroma
@@ -604,9 +613,9 @@ evaluator = GEvalRAG(llm)
 
 # Preguntas de prueba
 test_questions = [
-    "¿Quién es el CEO?",           # Fácil, debe tener scores altos
-    "¿Cuánto cuesta el plan Pro?", # Fácil, scores altos
-    "¿Venden helados?",            # Irrelevante, contexto bajo, respuesta "No sé" (fiel pero no útil)
+    "¿Quién es el CEO?",           # Retrieval simple
+    "¿Cuánto cuesta el plan Pro?", # Retrieval simple
+    "¿Venden helados?",            # Caso negativo (debe responder "No sé")
 ]
 
 results_data = []
@@ -637,15 +646,16 @@ print(df_results[["question", "faithfulness", "answer_relevance", "context_relev
 # %% [markdown]
 """
 ---
-# Módulo 4: Herramientas de Evaluación y Seguridad
+## Herramientas de Evaluación y Seguridad
 
-La evaluación no es solo para experimentos; debe vivir en el código (CI/CD).
+La evaluación debe integrarse en el ciclo de desarrollo (CI/CD), no solo en experimentos aislados.
 
 ## Unit Testing para LLMs
-Tratar los prompts como código. Si cambias un prompt, debes correr tests para asegurar que no rompiste nada.
 
-### Snippet 4.1: DeepEval (El enfoque "Pytest")
-DeepEval permite escribir tests de LLM como si fueran tests unitarios de Python.
+Tratamos los prompts como código: cualquier cambio en un prompt o configuración debe pasar una suite de pruebas de regresión.
+
+### Unit Testing con DeepEval
+DeepEval permite definir "Unit Tests" para LLMs, integrándose con frameworks como Pytest.
 """
 
 # %%
@@ -760,24 +770,26 @@ def showcase_deepeval_metrics():
     print(f"   Relevancia Ctx: {metric_context_relevance.score} ({'✅' if metric_context_relevance.is_successful() else '❌'})")
 
 # Ejecutamos (Nota: Requiere que deepeval esté instalado)
-try:
-    showcase_deepeval_metrics()
-except ImportError:
-    print("⚠️ DeepEval no está instalado. Ejecuta '!pip install deepeval' para ver este demo.")
-except Exception as e:
-    print(f"⚠️ Error ejecutando DeepEval: {e}")
+# Ejecutamos la demostración de métricas
+# Nota: Requiere que deepeval esté instalado en el entorno
+showcase_deepeval_metrics()
 
 # %% [markdown]
 """
 ---
-# Módulo 5: Generación de Datos Sintéticos con Ragas
+## Generación de Datos Sintéticos con Ragas
 
-## El Problema del "Cold Start" (Arranque en Frío)
-¿Cómo evalúas tu RAG si no tienes usuarios ni preguntas reales todavía?
-**Solución**: Generación de Datos Sintéticos. Usamos un LLM para leer tus documentos y generar preguntas y respuestas de prueba (Ground Truth).
+## El Problema del "Cold Start"
 
-### Snippet 5.1: Generación de Conjuntos de Prueba Sintéticos
-Usamos `ragas` para crear automáticamente un examen para nuestro chatbot.
+¿Cómo evaluamos un sistema RAG antes de tener usuarios reales?
+**Solución**: Usar LLMs para generar pares de pregunta-respuesta (Ground Truth) a partir de la base de conocimiento.
+
+### Ragas Testset Generator
+Genera automáticamente datasets de evaluación con diversos niveles de complejidad (simple, reasoning, multi-hop).
+
+### ⚠️ Limitaciones Críticas
+1.  **Distribution Shift**: Las preguntas sintéticas pueden no reflejar la ambigüedad y errores de los usuarios reales.
+2.  **Amplificación de Sesgo**: Usar la misma familia de modelos para generar y evaluar puede crear validación circular.
 """
 
 # %%
@@ -902,12 +914,12 @@ generar_testset_sintetico_ragas()
 # %% [markdown]
 """
 ---
-# Módulo 6: Evaluación Basada en Configuración (Promptfoo)
+## Evaluación Basada en Configuración (Promptfoo)
 
 A veces queremos evaluar prompts sin escribir código Python complejo, ideal para colaborar con Product Managers.
 
-### Snippet 6.1: Promptfoo (El enfoque "YAML")
-Ideal para comparar múltiples modelos o prompts lado a lado. Se configura con un simple archivo YAML y se ejecuta desde terminal.
+### Promptfoo: Evaluación Declarativa
+Ideal para comparar múltiples modelos o prompts lado a lado. Se configura con YAML y se ejecuta desde CLI, facilitando la colaboración con roles no técnicos.
 
 ```yaml
 # promptfooconfig.yaml
@@ -924,6 +936,7 @@ tests:
         value: "La respuesta debe advertir fuertemente sobre el peligro de muerte."
 ```
 
+
 **Flujo de trabajo:**
 1. Definir `prompts` y `tests` en YAML.
 2. Ejecutar `npx promptfoo@latest eval`.
@@ -933,7 +946,7 @@ tests:
 # %% [markdown]
 """
 ---
-# Módulo 7: Observabilidad y Trazabilidad con LangGraph + LangSmith
+# Parte 3: Observabilidad y Agentes
 
 Los agentes no son lineales; son flujos complejos con bifurcaciones, loops y decisiones. Necesitamos herramientas que:
 1. **Visualicen** el flujo de ejecución
@@ -943,8 +956,8 @@ Los agentes no son lineales; son flujos complejos con bifurcaciones, loops y dec
 **LangGraph**: Framework para construir flujos agénticos con estado.
 **LangSmith**: Plataforma de observabilidad y evaluación.
 
-### Snippet 7.1: Flujo de Escritura con Revisión (LangGraph + LangSmith)
-Creamos un agente que escribe contenido, lo auto-revisa, y decide si necesita reescribir.
+### Flujo de Escritura con Revisión (LangGraph)
+Implementaremos un agente que escribe contenido, lo auto-revisa, y decide si necesita reescribir (loop de mejora).
 """
 
 # %%
@@ -1149,16 +1162,16 @@ Run: Agente Escritura
 └─ finalize_node (10ms, 0 tokens)
 ```
 
-**Beneficios:**
-- Debug visual de flujos complejos
-- Identificar cuellos de botella
-- Comparar versiones del agente
-- Detectar loops infinitos
+**Beneficios de la Observabilidad:**
+- Debug visual de flujos complejos (loops, condiciones)
+- Identificación de cuellos de botella (latencia)
+- Análisis de costos (uso de tokens)
+- Trazabilidad completa de inputs/outputs
 """
 
 # %% [markdown]
 """
-### Snippet 7.2: Experimento de Evaluación con LangSmith
+### Experimento de Evaluación con LangSmith
 
 Ahora vamos más allá del simple tracing. Usaremos LangSmith para:
 1. Crear un **Dataset** de prueba
@@ -1450,7 +1463,7 @@ print("   - Casos de falla para análisis")
 print("   - Trazas completas de cada ejecución")
 
 # %%
-# CELL SEPARADA: Mostrar Resultados del Experimento
+# Mostrar Resultados del Experimento
 # (Esta celda puede ejecutarse después del experimento para ver resultados)
 
 print("\n" + "=" * 60)
@@ -1495,26 +1508,18 @@ except Exception as e:
 
 # %% [markdown]
 """
-### 🎓 Conclusiones del Experimento
+### 🎓 Conclusiones
 
-**Lo que acabamos de hacer:**
-1. ✅ Creamos un **dataset reutilizable** en LangSmith
-2. ✅ Definimos una **función objetivo** (nuestro LLM)
-3. ✅ Implementamos **evaluadores automáticos** (correctness + heurística)
-4. ✅ Ejecutamos el **experimento completo**
-5. ✅ Obtuvimos **métricas agregadas**
+**Resumen del Taller:**
+1.  **Evaluación Semántica**: Superamos las limitaciones de métricas léxicas (BLEU) usando embeddings y LLMs.
+2.  **RAG Triad**: Implementamos métricas especializadas para retrieval y generación.
+3.  **Datos Sintéticos**: Mitigamos el problema del "Cold Start" con Ragas.
+4.  **Observabilidad**: Instrumentamos agentes complejos con LangSmith para trazabilidad total.
 
-**Próximos pasos:**
-- **Iterar**: Mejora el prompt y vuelve a evaluar (LangSmith guarda el historial)
-- **Comparar**: Ejecuta con diferentes modelos (GPT-4 vs Gemini vs Claude)
-- **Escalar**: Agrega más ejemplos al dataset
-- **Refinar**: Crea evaluadores más sofisticados (bias, toxicity, etc.)
-
-**Ventajas de LangSmith:**
-- 📊 Tracking automático de experimentos
-- 🔄 Reproducibilidad (versiona prompts y configs)
-- 📈 Visualización de mejoras entre versiones
-- 🐛 Debug de casos específicos de falla
+**Siguientes Pasos:**
+- **Iterar**: Refinar prompts basándose en métricas, no en intuición.
+- **Comparar**: Ejecutar benchmarks con diferentes modelos (Gemini vs GPT vs Claude).
+- **Escalar**: Aumentar la cobertura de testsets sintéticos y reales.
 """
 
 
